@@ -1,0 +1,21 @@
+.DS_Store
+node_modules/
+
+# Local planner captures and generated assets can be huge and may include
+# session-specific IKEA/HomeByMe data. Regenerate them with the CLI instead.
+capture/
+assets/
+samples/
+
+# Ad-hoc exports when users choose output folders outside the ignored dirs.
+*.obj
+*.mtl
+*_textures/
+*.glb
+*.dae
+*.har
+
+# Logs and local env.
+*.log
+.env
+.env.*
