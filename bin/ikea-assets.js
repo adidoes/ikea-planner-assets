@@ -87,6 +87,7 @@ program
   .option("--worktops", "Include procedural worktop/countertop slabs from planner linear worktop data")
   .option("--flat", "Write one flat OBJ object without per-part o/g records")
   .option("--proxy-over-faces <n>", "Replace child OBJ parts above this face count with lightweight bounding-box proxies", parseInteger)
+  .option("--internal-parts <mode>", "How to handle hidden/internal cabinet parts: keep, proxy, or omit", "keep")
   .option("--axis <axis>", "Output axis convention: z-up or y-up", "z-up")
   .option("--name <name>", "Output basename for --whole", "Complete kitchen")
   .option("--scale <n>", "Unit scale from ByMe millimeters to target units", Number.parseFloat, 0.001)

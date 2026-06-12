@@ -20,6 +20,7 @@ async function assembleInputs(bmprojPath, assetMapPath, options) {
     axis: options.axis || "z-up",
     worktops: Boolean(options.worktops),
     proxyOverFaces: Number.isFinite(options.proxyOverFaces) ? options.proxyOverFaces : 0,
+    internalPartsMode: internalPartsMode(options.internalParts),
     scale: Number.isFinite(options.scale) ? options.scale : 0.001,
     resourceById: collectResourceInfos(project),
     assetById: new Map((assetMap.assets || []).filter((asset) => asset.resource?.id).map((asset) => [asset.resource.id, asset])),
@@ -83,6 +84,8 @@ async function assembleInputs(bmprojPath, assetMapPath, options) {
       leaves: context.leaves.length,
       proceduralWorktops: context.proceduralWorktops.length,
       operationCutouts: context.operationCutouts.length,
+      internalLeaves: context.leaves.filter((leaf) => leaf.internalPart).length,
+      omittedLeaves: context.leaves.filter((leaf) => leaf.omitted).length,
       proxyLeaves: context.leaves.filter((leaf) => leaf.proxy).length,
       skipped: context.skipped.length,
       maxDepth: Math.max(0, ...context.leaves.map((leaf) => leaf.depth)),
@@ -185,6 +188,41 @@ async function resolveProduct(context, state) {
   }
 }
 
+function internalPartsMode(value) {
+  const mode = String(value || "keep").toLowerCase();
+  if (["keep", "proxy", "omit"].includes(mode)) return mode;
+  throw new Error(`Expected --internal-parts to be keep, proxy, or omit; got ${value}`);
+}
+
+function internalLeafReason(leaf) {
+  const label = String(leaf.label || "").toLowerCase();
+  const dbId = String(leaf.dbId || "").toLowerCase();
+  const partText = `${label} ${dbId}`;
+
+  if (/(front|door|handle|tap|mixer|sink|havs?en|hob|cooktop|oven|microwave|extractor|hood|plinth|chair|table|worktop|cover panel)/.test(partText)) {
+    return null;
+  }
+  if (/(bin with lid|waste sorting|support frame f waste|support frame .*waste)/.test(partText)) {
+    return "waste-bin system inside a closed cabinet";
+  }
+  if (/(pull-out interior fitting|interior fittings|int_fitt_pull-out)/.test(partText)) {
+    return "pull-out interior fitting inside a cabinet";
+  }
+  if (/(^|\s)maximera - drawer,|drawer, (low|medium|high), white|ma_drwr_|inner drawer|innerdrawer/.test(partText)) {
+    return "drawer box or inner drawer hidden behind fronts";
+  }
+  if (/(fixed .*shelf|ventilated shelf|shelf, white|shelf protector|utrusta - fixed)/.test(partText)) {
+    return "internal cabinet shelf";
+  }
+  if (/(connecting rail for fronts|våglig|vaglig)/.test(partText)) {
+    return "internal rail behind integrated appliance fronts";
+  }
+  if (/(integrated dishwasher|fridge\/freezer.*integrated|fridge freezer.*integrated|ikea 500 integrated)/.test(partText)) {
+    return "integrated appliance hidden behind cabinet fronts";
+  }
+  return null;
+}
+
 async function writeCombinedObj(context, objPath, mtlPath) {
   const obj = [
     "# Composed ByMe BMA assembly by ikea-planner-assets",
@@ -206,7 +244,24 @@ async function writeCombinedObj(context, objPath, mtlPath) {
     const sourceStats = objStats(source);
     const localCounts = { v: 0, vt: 0, vn: 0 };
     if (fit?.report) leaf.fit = fit.report;
-    if (context.proxyOverFaces > 0 && sourceStats.f > context.proxyOverFaces) {
+    const internalReason = internalLeafReason(leaf);
+    if (internalReason) {
+      leaf.internalPart = { reason: internalReason, mode: context.internalPartsMode };
+      if (context.internalPartsMode === "omit") {
+        leaf.omitted = {
+          reason: `internal part omitted: ${internalReason}`,
+          sourceFaces: sourceStats.f,
+          sourceVertices: sourceStats.v,
+        };
+        continue;
+      }
+    }
+    const proxyReason = internalReason && context.internalPartsMode === "proxy"
+      ? `internal part proxied: ${internalReason}`
+      : (context.proxyOverFaces > 0 && sourceStats.f > context.proxyOverFaces
+          ? `source faces ${sourceStats.f} > threshold ${context.proxyOverFaces}`
+          : null);
+    if (proxyReason) {
       const material = proxyMaterialForLeaf(leaf);
       if (!proxyMaterials.has(material.name)) {
         proxyMaterials.set(material.name, material);
@@ -218,7 +273,7 @@ async function writeCombinedObj(context, objPath, mtlPath) {
         mtl.push("d 1");
       }
       leaf.proxy = {
-        reason: `source faces ${sourceStats.f} > threshold ${context.proxyOverFaces}`,
+        reason: proxyReason,
         sourceFaces: sourceStats.f,
         sourceVertices: sourceStats.v,
         material: material.name,
