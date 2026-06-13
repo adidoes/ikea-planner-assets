@@ -331,13 +331,15 @@ async function writeCombinedObj(context, objPath, mtlPath) {
     const material = await worktopMaterial(context, path.dirname(mtlPath));
     mtl.push("");
     mtl.push(`newmtl ${material.name}`);
+    mtl.push(`Ka ${material.color.join(" ")}`);
     mtl.push(`Kd ${material.color.join(" ")}`);
     mtl.push("Ks 0.196078 0.196078 0.196078");
+    mtl.push("illum 2");
     mtl.push("Ns 100");
     mtl.push("d 1");
     if (material.texture) mtl.push(`map_Kd ${material.texture}`);
     for (const slab of context.proceduralWorktops) {
-      const counts = appendWorktopSlab(obj, slab, material.name, vertexBase, uvBase, normalBase, context);
+      const counts = appendWorktopSlab(obj, slab, material, vertexBase, uvBase, normalBase, context);
       vertexBase += counts.v;
       uvBase += counts.vt;
       normalBase += counts.vn;
@@ -388,7 +390,71 @@ function collectProceduralWorktops(context) {
   for (const worktop of collectWorktopLinears(context.project)) {
     slabs.push(...slabsForWorktop(context, worktop));
   }
+  normalizeWorktopOverlaps(slabs);
   return slabs;
+}
+
+function normalizeWorktopOverlaps(slabs) {
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = false;
+    for (let i = 0; i < slabs.length; i++) {
+      for (let j = i + 1; j < slabs.length; j++) {
+        changed = trimWorktopOverlap(slabs[i], slabs[j]) || changed;
+      }
+    }
+    if (!changed) break;
+  }
+  for (const slab of slabs) refreshWorktopSlabGeometry(slab);
+}
+
+function trimWorktopOverlap(a, b) {
+  if (a.orientation !== b.orientation || Math.abs((a.altitude || 0) - (b.altitude || 0)) > 0.1) return false;
+  if (!a.primary || !a.secondary || !b.primary || !b.secondary) return false;
+  const overlapU = rangeOverlap(a.primary, b.primary);
+  const overlapV = rangeOverlap(a.secondary, b.secondary);
+  if (overlapU <= 0 || overlapV <= 0) return false;
+  let changed = false;
+  if (overlapV <= 80 && overlapU > 80) {
+    const centerA = (a.secondary.min + a.secondary.max) / 2;
+    const centerB = (b.secondary.min + b.secondary.max) / 2;
+    const split = (Math.max(a.secondary.min, b.secondary.min) + Math.min(a.secondary.max, b.secondary.max)) / 2;
+    if (centerA <= centerB) {
+      a.secondary.max = Math.min(a.secondary.max, split);
+      b.secondary.min = Math.max(b.secondary.min, split);
+    } else {
+      b.secondary.max = Math.min(b.secondary.max, split);
+      a.secondary.min = Math.max(a.secondary.min, split);
+    }
+    changed = true;
+  } else if (overlapU <= 80 && overlapV > 80) {
+    const centerA = (a.primary.min + a.primary.max) / 2;
+    const centerB = (b.primary.min + b.primary.max) / 2;
+    const split = (Math.max(a.primary.min, b.primary.min) + Math.min(a.primary.max, b.primary.max)) / 2;
+    if (centerA <= centerB) {
+      a.primary.max = Math.min(a.primary.max, split);
+      b.primary.min = Math.max(b.primary.min, split);
+    } else {
+      b.primary.max = Math.min(b.primary.max, split);
+      a.primary.min = Math.max(a.primary.min, split);
+    }
+    changed = true;
+  }
+  if (changed) {
+    a.overlapFixes = (a.overlapFixes || 0) + 1;
+    b.overlapFixes = (b.overlapFixes || 0) + 1;
+  }
+  return changed;
+}
+
+function rangeOverlap(a, b) {
+  return Math.min(a.max, b.max) - Math.max(a.min, b.min);
+}
+
+function refreshWorktopSlabGeometry(slab) {
+  const axes = slab.axes || axesFromOrientation(slab.orientation);
+  slab.size.width = slab.primary.max - slab.primary.min;
+  slab.size.depth = slab.secondary.max - slab.secondary.min;
+  slab.points = rectanglePoints(axes.u, axes.v, slab.primary, slab.secondary);
 }
 
 function slabsForWorktop(context, worktop) {
@@ -570,7 +636,7 @@ function orientationKey(axis) {
 function canonicalAxes(key) {
   return key === "x"
     ? { u: [1, 0], v: [0, 1] }
-    : { u: [0, 1], v: [1, 0] };
+    : { u: [0, 1], v: [-1, 0] };
 }
 
 function clusterBySecondaryCenter(items, secondaryAxis) {
@@ -985,15 +1051,18 @@ async function worktopMaterial(context, outDir) {
     await fs.writeFile(texturePath, Buffer.from(binary).slice(image.byteOffset, image.byteOffset + image.byteLength));
     return {
       name: "procedural_worktop",
-      color: material.color || fallback.color,
+      color: [1, 1, 1],
       texture: path.relative(outDir, texturePath).replace(/\\/g, "/"),
+      sourceUvTransform: Array.isArray(material.uv0Transform) ? material.uv0Transform : null,
+      sourceColor: material.color || null,
     };
   } catch {
     return fallback;
   }
 }
 
-function appendWorktopSlab(obj, slab, materialName, vertexBase, uvBase, normalBase, context) {
+function appendWorktopSlab(obj, slab, material, vertexBase, uvBase, normalBase, context) {
+  const materialName = material.name;
   const bottomZ = slab.altitude;
   const topZ = slab.altitude + slab.thickness;
   const axes = slab.axes || axesFromOrientation(slab.orientation);
@@ -1015,7 +1084,7 @@ function appendWorktopSlab(obj, slab, materialName, vertexBase, uvBase, normalBa
     return orientPoint([xy[0] * context.scale, xy[1] * context.scale, z * context.scale], context.axis);
   };
   const normal = (vector) => normalize(orientVector(vector, context.axis));
-  const uv = (u, v) => [(u - primary.min) * context.scale, (v - secondary.min) * context.scale];
+  const uv = (u, v) => worktopUv(u, v, primary, secondary, material, context.scale);
   const addQuad = (vertices, uvs, n) => {
     const vStart = vertexBase + counts.v + 1;
     const vtStart = uvBase + counts.vt + 1;
@@ -1023,7 +1092,8 @@ function appendWorktopSlab(obj, slab, materialName, vertexBase, uvBase, normalBa
     for (const vertex of vertices) obj.push(`v ${vertex[0]} ${vertex[1]} ${vertex[2]}`);
     for (const vt of uvs) obj.push(`vt ${vt[0]} ${vt[1]}`);
     obj.push(`vn ${n[0]} ${n[1]} ${n[2]}`);
-    obj.push(`f ${[0, 1, 2, 3].map((index) => `${vStart + index}/${vtStart + index}/${vnIndex}`).join(" ")}`);
+    obj.push(`f ${[0, 1, 2].map((index) => `${vStart + index}/${vtStart + index}/${vnIndex}`).join(" ")}`);
+    obj.push(`f ${[0, 2, 3].map((index) => `${vStart + index}/${vtStart + index}/${vnIndex}`).join(" ")}`);
     counts.v += 4;
     counts.vt += 4;
     counts.vn += 1;
@@ -1061,6 +1131,14 @@ function appendWorktopSlab(obj, slab, materialName, vertexBase, uvBase, normalBa
   }
 
   return counts;
+}
+
+function worktopUv(u, v, primary, secondary, material, scale) {
+  void material;
+  void scale;
+  const width = Math.max(1, primary.max - primary.min);
+  const depth = Math.max(1, secondary.max - secondary.min);
+  return [(u - primary.min) / width, (v - secondary.min) / depth];
 }
 
 function addVerticalRect(addQuad, point, uv, normal, u1, u2, v1, v2, bottomZ, topZ, outward) {

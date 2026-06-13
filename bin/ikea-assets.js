@@ -11,6 +11,7 @@ const { convertInputs } = require("../src/convert");
 const { indexBundles } = require("../src/index-bundles");
 const { mapAssets } = require("../src/map-assets");
 const { nameExports } = require("../src/name-exports");
+const { previewObj } = require("../src/preview");
 const { runSelfTest } = require("../src/self-test");
 
 const program = new Command();
@@ -100,6 +101,18 @@ program
   .requiredOption("--obj-dir <dir>", "Directory containing converted OBJ/MTL/texture files")
   .option("-o, --out <dir>", "Named OBJ bundle directory", "assets/named-obj")
   .action(async (assetMap, options) => nameExports(assetMap, options));
+
+program
+  .command("preview")
+  .description("Render fixed-angle PNG previews for an OBJ/MTL bundle with Three.js and Playwright.")
+  .argument("<obj>", "OBJ file to preview")
+  .requiredOption("--mtl <file>", "MTL file to load with the OBJ")
+  .option("-o, --out <dir>", "Preview output directory", "assets/previews")
+  .option("--width <px>", "Screenshot width", parseInteger, 1400)
+  .option("--height <px>", "Screenshot height", parseInteger, 1000)
+  .option("--only-material <regex>", "Only show meshes whose material name matches this regex")
+  .option("--angles <names>", "Comma-separated angles: iso,front,back,left,right,top,low", "iso,front,right,left,top")
+  .action(async (obj, options) => previewObj(obj, options));
 
 program
   .command("map-assets")

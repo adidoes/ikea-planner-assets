@@ -71,6 +71,13 @@ If the user does not need hidden contents inside closed cabinets, omit those int
 node bin/ikea-assets.js assemble capture/playwright/bodies/<project>.BMPROJ capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/whole-kitchen --whole --worktops --flat --axis y-up --internal-parts omit --proxy-over-faces 500 --name ikea-kitchen-livehome-flat-yup-no-internals-lite
 ```
 
+Render review screenshots before asking the user to test in Live Home:
+
+```bash
+node bin/ikea-assets.js preview assets/whole-kitchen/<candidate>.obj --mtl assets/whole-kitchen/<candidate>.mtl -o assets/previews/<candidate>
+node bin/ikea-assets.js preview assets/whole-kitchen/<candidate>.obj --mtl assets/whole-kitchen/<candidate>.mtl -o assets/previews/<candidate>-worktops --only-material procedural_worktop
+```
+
 ## Important Outputs
 
 - `capture/<run>/asset-map.tsv`: human-readable correlation between opaque CDN files and planner/catalog names.
@@ -78,6 +85,7 @@ node bin/ikea-assets.js assemble capture/playwright/bodies/<project>.BMPROJ capt
 - `assets/assemblies/`: single placed furniture assemblies.
 - `assets/whole-kitchen/`: whole-kitchen OBJ/MTL bundles and `.assembly-report.json`.
 - `.assembly-report.json`: diagnostics for placements, resolved leaves, procedural worktops, cutout operations, fitted scaling areas, skipped references, and proxy substitutions.
+- `assets/previews/`: generated full-scene and material-filtered screenshots plus `.preview-report.json` files.
 
 Do not commit `capture/`, `assets/`, `node_modules/`, generated OBJ/MTL files, HARs, or planner screenshots. They are local artifacts and can be very large.
 
@@ -98,11 +106,13 @@ Do not commit `capture/`, `assets/`, `node_modules/`, generated OBJ/MTL files, H
 
 For parametric cabinet parts, `assemble` reads BM3 `scalingAreas` and fits source geometry to the resolved child `width`, `depth`, and `height` parameters. This is what keeps fronts, drawers, shelves, frames, and rails aligned instead of leaving them at default catalog sizes.
 
-With `--worktops`, `assemble` reads planner linear worktop data and generates procedural slab meshes. It extracts the captured `.BM3MAT` worktop texture, adds it to the MTL, and detects sink/hob/tap cutout operation assemblies. Those cutouts are assigned to the matching slab and subtracted by tessellating the slab top/bottom plus vertical opening walls.
+With `--worktops`, `assemble` reads planner linear worktop data and generates procedural slab meshes. It extracts the captured `.BM3MAT` worktop texture, adds it to the MTL with neutral diffuse color so importers do not darken the texture, and detects sink/hob/tap cutout operation assemblies. Those cutouts are assigned to the matching slab and subtracted by tessellating the slab top/bottom plus vertical opening walls. Procedural worktops are triangulated for importer stability, same-plane slab overlaps are trimmed at seams, and worktop UVs are normalized per slab for robust OBJ/MTL rendering.
 
 With `--internal-parts proxy|omit`, `assemble` classifies hidden cabinet contents by part labels and IDs. Current hidden internals include waste bins and support frames, drawer boxes and inner drawers, internal shelves, pull-out interior fittings, connecting rails behind integrated fronts, and integrated appliances that are hidden behind cabinet fronts. `proxy` replaces those leaves with fitted bounding boxes; `omit` leaves them out of the written OBJ entirely. The report records `internalPart`, `proxy`, and `omitted` decisions per leaf.
 
 With `--proxy-over-faces <n>`, `assemble` counts each child source OBJ. If a leaf exceeds the threshold, it replaces that leaf with a fitted bounding-box proxy materialized at the same transform. This keeps Live Home 3D imports manageable while preserving overall placement and dimensions.
+
+`preview` starts a local static server, loads the OBJ/MTL with Three.js in headless Playwright, renders fixed cameras, and writes PNGs plus a JSON scene report. For countertop iteration, always compare at least the whole-scene `iso/front/right` previews and the `--only-material procedural_worktop` `iso/front/right/top` previews. Then ask the user to import the best candidate into Live Home and report whether rotation still produces artifacts.
 
 ## Live Home 3D Import
 
