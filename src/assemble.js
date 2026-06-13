@@ -19,6 +19,7 @@ async function assembleInputs(bmprojPath, assetMapPath, options) {
     flat: Boolean(options.flat),
     axis: options.axis || "z-up",
     worktops: Boolean(options.worktops),
+    plinths: Boolean(options.plinths || options.worktops),
     proxyOverFaces: Number.isFinite(options.proxyOverFaces) ? options.proxyOverFaces : 0,
     internalPartsMode: internalPartsMode(options.internalParts),
     scale: Number.isFinite(options.scale) ? options.scale : 0.001,
@@ -28,6 +29,7 @@ async function assembleInputs(bmprojPath, assetMapPath, options) {
     furnitureByUuid: new Map(),
     scalingAreasByAssetFile: new Map(),
     proceduralWorktops: [],
+    proceduralPlinths: [],
     operationCutouts: [],
     leaves: [],
     skipped: [],
@@ -59,6 +61,9 @@ async function assembleInputs(bmprojPath, assetMapPath, options) {
     context.proceduralWorktops = collectProceduralWorktops(context);
     assignWorktopCutouts(context);
   }
+  if (options.whole && context.plinths) {
+    context.proceduralPlinths = collectProceduralPlinths(context);
+  }
 
   const root = roots[0];
   const rootLabel = options.whole ? "Complete kitchen" : labelForAsset(context.assetById.get(root.dbId));
@@ -84,6 +89,7 @@ async function assembleInputs(bmprojPath, assetMapPath, options) {
       leaves: context.leaves.length,
       proceduralWorktops: context.proceduralWorktops.length,
       worktopCornerBridges: context.proceduralWorktops.filter((slab) => slab.cornerBridge).length,
+      proceduralPlinths: context.proceduralPlinths.length,
       operationCutouts: context.operationCutouts.length,
       internalLeaves: context.leaves.filter((leaf) => leaf.internalPart).length,
       omittedLeaves: context.leaves.filter((leaf) => leaf.omitted).length,
@@ -92,6 +98,7 @@ async function assembleInputs(bmprojPath, assetMapPath, options) {
       maxDepth: Math.max(0, ...context.leaves.map((leaf) => leaf.depth)),
     },
     proceduralWorktops: context.proceduralWorktops,
+    proceduralPlinths: context.proceduralPlinths,
     operationCutouts: context.operationCutouts,
     placements: roots.map((item) => placementSummary(context, item, options.whole)),
     leaves: context.leaves,
@@ -347,6 +354,25 @@ async function writeCombinedObj(context, objPath, mtlPath) {
     }
   }
 
+  if (context.proceduralPlinths.length) {
+    const material = await plinthMaterial(context, path.dirname(mtlPath));
+    mtl.push("");
+    mtl.push(`newmtl ${material.name}`);
+    mtl.push(`Ka ${material.color.join(" ")}`);
+    mtl.push(`Kd ${material.color.join(" ")}`);
+    mtl.push("Ks 0.196078 0.196078 0.196078");
+    mtl.push("illum 2");
+    mtl.push("Ns 100");
+    mtl.push("d 1");
+    if (material.texture) mtl.push(`map_Kd ${material.texture}`);
+    for (const segment of context.proceduralPlinths) {
+      const counts = appendPlinthSegment(obj, segment, material, vertexBase, uvBase, normalBase, context);
+      vertexBase += counts.v;
+      uvBase += counts.vt;
+      normalBase += counts.vn;
+    }
+  }
+
   await fs.writeFile(objPath, `${obj.join("\n")}\n`);
   await fs.writeFile(mtlPath, `${mtl.join("\n")}\n`);
   await materializeMtlTextures(mtlPath);
@@ -386,6 +412,41 @@ function collectWorktopLinears(project) {
   });
 }
 
+function collectPlinthLinears(project) {
+  const out = [];
+  visit(project, (value) => {
+    if (Array.isArray(value?.plinths)) out.push(...value.plinths);
+  });
+  const seen = new Set();
+  return out.filter((plinth) => {
+    if (!plinth?.uuid || seen.has(plinth.uuid)) return false;
+    seen.add(plinth.uuid);
+    return Array.isArray(plinth.furnitureIDs) && plinth.furnitureIDs.length;
+  });
+}
+
+function collectLinearInstances(project, type) {
+  const typeByUuid = new Map();
+  visit(project, (value) => {
+    const mapping = value?.furnitureLinearTypeMap;
+    if (!mapping || typeof mapping !== "object") return;
+    for (const [uuid, linearType] of Object.entries(mapping)) {
+      typeByUuid.set(uuid, linearType);
+    }
+  });
+
+  const out = [];
+  const seen = new Set();
+  visit(project, (value) => {
+    if (!value?.uuid || seen.has(value.uuid)) return;
+    if (typeByUuid.get(value.uuid) !== type) return;
+    if (!value.embedResourceInfo?.designTree?.sketches) return;
+    seen.add(value.uuid);
+    out.push(value);
+  });
+  return out;
+}
+
 function collectProceduralWorktops(context) {
   const slabs = [];
   for (const worktop of collectWorktopLinears(context.project)) {
@@ -394,6 +455,82 @@ function collectProceduralWorktops(context) {
   normalizeWorktopOverlaps(slabs);
   addWorktopCornerBridges(slabs);
   return slabs;
+}
+
+function collectProceduralPlinths(context) {
+  const plinths = collectPlinthLinears(context.project);
+  const linears = collectLinearInstances(context.project, "Plinth");
+  const segments = [];
+  linears.forEach((linear, linearIndex) => {
+    const plinth = plinths[linearIndex] || null;
+    const materialDbId = dbIdFromValue(paramsFromConfig(linear.parametersConfig).Default) || plinth?.productInfoDbId || null;
+    const height = Number(plinth?.parameters?.height?.value) || linearProfileHeight(linear) || 80;
+    const thickness = Number(plinth?.parameters?.depth?.value) || linearProfileThickness(linear) || 10;
+    linearPathEdges(linear).forEach((edge, segmentIndex) => {
+      const a = edge.vertices?.[0];
+      const b = edge.vertices?.[1];
+      if (!a || !b) return;
+      const start = [Number(a.x), Number(a.y)];
+      const end = [Number(b.x), Number(b.y)];
+      const length = distance2(start, end);
+      if (!Number.isFinite(length) || length < 20) return;
+      const topZ = Number(edge.plane?.O_z) || height;
+      segments.push({
+        uuid: `${linear.uuid}_${edge.gmID ?? segments.length}`,
+        linearUuid: linear.uuid,
+        plinthUuid: plinth?.uuid || null,
+        materialDbId,
+        label: `Plinth ${linearIndex + 1}.${segmentIndex + 1}`,
+        furnitureIDs: plinth?.furnitureIDs || [],
+        sourceFurnitureIDs: plinth?.furnitureIDs || [],
+        height,
+        thickness,
+        altitude: topZ - height,
+        topZ,
+        length,
+        start,
+        end,
+        productInfoDbId: plinth?.productInfoDbId || materialDbId,
+      });
+    });
+  });
+  return segments;
+}
+
+function linearPathEdges(linear) {
+  const sketches = linear.embedResourceInfo?.designTree?.sketches || [];
+  const pathSketch = sketches
+    .map((entry) => entry.sketch || entry)
+    .find((sketch) => (sketch.edges || []).some((edge) => edge.type === "EdgeLine" && edge.vertices?.[0]?.x !== undefined));
+  if (!pathSketch) return [];
+  return (pathSketch.edges || [])
+    .filter((edge) => edge.type === "EdgeLine" && edge.vertices?.length >= 2)
+    .map((edge) => Object.assign({ plane: pathSketch.plane || {} }, edge));
+}
+
+function linearProfileHeight(linear) {
+  const profile = linearProfileBounds(linear);
+  return profile ? profile.maxY - profile.minY : 0;
+}
+
+function linearProfileThickness(linear) {
+  const profile = linearProfileBounds(linear);
+  return profile ? profile.maxX - profile.minX : 0;
+}
+
+function linearProfileBounds(linear) {
+  const sketches = linear.embedResourceInfo?.designTree?.sketches || [];
+  const profileSketch = sketches
+    .map((entry) => entry.sketch || entry)
+    .find((sketch) => Number(sketch.plane?.O_z || 0) === 0);
+  const points = (profileSketch?.edges || []).flatMap((edge) => edge.vertices || []);
+  if (!points.length) return null;
+  return {
+    minX: Math.min(...points.map((point) => Number(point.x))),
+    maxX: Math.max(...points.map((point) => Number(point.x))),
+    minY: Math.min(...points.map((point) => Number(point.y))),
+    maxY: Math.max(...points.map((point) => Number(point.y))),
+  };
 }
 
 function normalizeWorktopOverlaps(slabs) {
@@ -808,6 +945,16 @@ function dot2(a, b) {
   return a[0] * b[0] + a[1] * b[1];
 }
 
+function distance2(a, b) {
+  return Math.hypot(a[0] - b[0], a[1] - b[1]);
+}
+
+function normalize2(v, fallback = [0, 0]) {
+  const length = Math.hypot(v[0], v[1]);
+  if (!length) return fallback.slice();
+  return [v[0] / length, v[1] / length];
+}
+
 function median(values) {
   const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
   if (!sorted.length) return 0;
@@ -1170,6 +1317,37 @@ async function worktopMaterial(context, outDir) {
   }
 }
 
+async function plinthMaterial(context, outDir) {
+  const materialDbId = context.proceduralPlinths.find((segment) => segment.materialDbId)?.materialDbId;
+  const asset = materialDbId ? context.assetById.get(materialDbId) : null;
+  const fallback = { name: "procedural_plinth", color: [0.71, 0.67, 0.6], texture: null };
+  if (!asset?.assetFile) return fallback;
+  try {
+    const zip = unzipSync(new Uint8Array(await fs.readFile(asset.assetFile)));
+    const manifestBytes = zip["manifest.json"];
+    const binary = zip["binary.bin"];
+    if (!manifestBytes) return fallback;
+    const manifest = JSON.parse(Buffer.from(manifestBytes).toString("utf8"));
+    const material = manifest.materials?.[0] || {};
+    const image = binary ? manifest.images?.[manifest.textures?.[material.diffuseMap || 0]?.image || 0] : null;
+    if (!image) return Object.assign(fallback, { color: material.color || fallback.color, sourceColor: material.color || null });
+    const textureDir = path.join(outDir, "procedural_plinth_textures");
+    await ensureDir(textureDir);
+    const ext = image.format === "jpg" ? "jpg" : (image.format || "bin");
+    const textureName = sanitizeFileName(`${materialDbId || "plinth"}.${ext}`);
+    const texturePath = path.join(textureDir, textureName);
+    await fs.writeFile(texturePath, Buffer.from(binary).slice(image.byteOffset, image.byteOffset + image.byteLength));
+    return {
+      name: "procedural_plinth",
+      color: material.color || [1, 1, 1],
+      texture: path.relative(outDir, texturePath).replace(/\\/g, "/"),
+      sourceColor: material.color || null,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 function appendWorktopSlab(obj, slab, material, vertexBase, uvBase, normalBase, context) {
   const materialName = material.name;
   const bottomZ = slab.altitude;
@@ -1238,6 +1416,71 @@ function appendWorktopSlab(obj, slab, material, vertexBase, uvBase, normalBase, 
     addVerticalRect(addQuad, point, uv, normal, rect.minU, rect.maxU, rect.minV, rect.minV, bottomZ, topZ, axes.v);
     addVerticalRect(addQuad, point, uv, normal, rect.maxU, rect.minU, rect.maxV, rect.maxV, bottomZ, topZ, mul2(axes.v, -1));
   }
+
+  return counts;
+}
+
+function appendPlinthSegment(obj, segment, material, vertexBase, uvBase, normalBase, context) {
+  const length = distance2(segment.start, segment.end);
+  const direction = normalize2([segment.end[0] - segment.start[0], segment.end[1] - segment.start[1]], [1, 0]);
+  const normal2 = [-direction[1], direction[0]];
+  const half = Math.max(1, segment.thickness || 10) / 2;
+  const bottomZ = segment.altitude || 0;
+  const topZ = segment.topZ || bottomZ + (segment.height || 80);
+  const a0 = add2(segment.start, mul2(normal2, -half));
+  const a1 = add2(segment.start, mul2(normal2, half));
+  const b0 = add2(segment.end, mul2(normal2, -half));
+  const b1 = add2(segment.end, mul2(normal2, half));
+  const counts = { v: 0, vt: 0, vn: 0 };
+
+  obj.push("");
+  if (!context.flat) obj.push(`g procedural_${sanitizeObjName(segment.label)}_${sanitizeObjName(segment.uuid)}`);
+  obj.push(`# Procedural plinth: ${segment.uuid} ${length.toFixed(1)}x${segment.thickness.toFixed(1)}x${segment.height.toFixed(1)}mm`);
+  obj.push(`usemtl ${material.name}`);
+
+  const point = (xy, z) => orientPoint([xy[0] * context.scale, xy[1] * context.scale, z * context.scale], context.axis);
+  const addQuad = (vertices, uvs) => {
+    const oriented = vertices.map((vertex) => point(vertex.xy, vertex.z));
+    const vStart = vertexBase + counts.v + 1;
+    const vtStart = uvBase + counts.vt + 1;
+    const vnIndex = normalBase + counts.vn + 1;
+    for (const vertex of oriented) obj.push(`v ${vertex[0]} ${vertex[1]} ${vertex[2]}`);
+    for (const uv of uvs) obj.push(`vt ${uv[0]} ${uv[1]}`);
+    const n = normalForQuad(oriented);
+    obj.push(`vn ${n[0]} ${n[1]} ${n[2]}`);
+    obj.push(`f ${[0, 1, 2].map((index) => `${vStart + index}/${vtStart + index}/${vnIndex}`).join(" ")}`);
+    obj.push(`f ${[0, 2, 3].map((index) => `${vStart + index}/${vtStart + index}/${vnIndex}`).join(" ")}`);
+    counts.v += 4;
+    counts.vt += 4;
+    counts.vn += 1;
+  };
+  const uvLen = length / 1000;
+  const uvHeight = Math.max(1, segment.height || 80) / 1000;
+
+  addQuad(
+    [{ xy: a0, z: bottomZ }, { xy: b0, z: bottomZ }, { xy: b0, z: topZ }, { xy: a0, z: topZ }],
+    [[0, 0], [uvLen, 0], [uvLen, uvHeight], [0, uvHeight]],
+  );
+  addQuad(
+    [{ xy: b1, z: bottomZ }, { xy: a1, z: bottomZ }, { xy: a1, z: topZ }, { xy: b1, z: topZ }],
+    [[0, 0], [uvLen, 0], [uvLen, uvHeight], [0, uvHeight]],
+  );
+  addQuad(
+    [{ xy: a1, z: topZ }, { xy: a0, z: topZ }, { xy: b0, z: topZ }, { xy: b1, z: topZ }],
+    [[0, 0], [0, 1], [uvLen, 1], [uvLen, 0]],
+  );
+  addQuad(
+    [{ xy: a0, z: bottomZ }, { xy: a1, z: bottomZ }, { xy: b1, z: bottomZ }, { xy: b0, z: bottomZ }],
+    [[0, 0], [0, 1], [uvLen, 1], [uvLen, 0]],
+  );
+  addQuad(
+    [{ xy: a1, z: bottomZ }, { xy: a0, z: bottomZ }, { xy: a0, z: topZ }, { xy: a1, z: topZ }],
+    [[0, 0], [1, 0], [1, uvHeight], [0, uvHeight]],
+  );
+  addQuad(
+    [{ xy: b0, z: bottomZ }, { xy: b1, z: bottomZ }, { xy: b1, z: topZ }, { xy: b0, z: topZ }],
+    [[0, 0], [1, 0], [1, uvHeight], [0, uvHeight]],
+  );
 
   return counts;
 }

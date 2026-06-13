@@ -76,6 +76,7 @@ Render review screenshots before asking the user to test in Live Home:
 ```bash
 node bin/ikea-assets.js preview assets/whole-kitchen/<candidate>.obj --mtl assets/whole-kitchen/<candidate>.mtl -o assets/previews/<candidate>
 node bin/ikea-assets.js preview assets/whole-kitchen/<candidate>.obj --mtl assets/whole-kitchen/<candidate>.mtl -o assets/previews/<candidate>-worktops --only-material procedural_worktop
+node bin/ikea-assets.js preview assets/whole-kitchen/<candidate>.obj --mtl assets/whole-kitchen/<candidate>.mtl -o assets/previews/<candidate>-plinths --only-material procedural_plinth
 ```
 
 ## Important Outputs
@@ -107,6 +108,8 @@ Do not commit `capture/`, `assets/`, `node_modules/`, generated OBJ/MTL files, H
 For parametric cabinet parts, `assemble` reads BM3 `scalingAreas` and fits source geometry to the resolved child `width`, `depth`, and `height` parameters. This is what keeps fronts, drawers, shelves, frames, and rails aligned instead of leaving them at default catalog sizes.
 
 With `--worktops`, `assemble` reads planner linear worktop data and generates procedural slab meshes. It extracts the captured `.BM3MAT` worktop texture, adds it to the MTL with neutral diffuse color so importers do not darken the texture, and detects sink/hob/tap cutout operation assemblies. Those cutouts are assigned to the matching slab and subtracted by tessellating the slab top/bottom plus vertical opening walls. Procedural worktops are triangulated for importer stability, same-plane slab overlaps are trimmed at seams, and worktop UVs are normalized per slab for robust OBJ/MTL rendering.
+
+`--worktops` also enables procedural plinth/toe-kick export, and `--plinths` can be used directly when only those linears are needed. Plinth geometry comes from the hidden kitchen-linear furniture entries in `.BMPROJ` whose `embedResourceInfo.designTree.sketches` contain the planner-calculated path edges. The exporter writes each path edge as an 80mm-high, 10mm-thick strip using the captured plinth `.BM3MAT` color. The assembly report records these as `proceduralPlinths`.
 
 With `--internal-parts proxy|omit`, `assemble` classifies hidden cabinet contents by part labels and IDs. Current hidden internals include waste bins and support frames, drawer boxes and inner drawers, internal shelves, pull-out interior fittings, connecting rails behind integrated fronts, and integrated appliances that are hidden behind cabinet fronts. `proxy` replaces those leaves with fitted bounding boxes; `omit` leaves them out of the written OBJ entirely. The report records `internalPart`, `proxy`, and `omitted` decisions per leaf.
 
@@ -144,4 +147,4 @@ node --check src/assemble.js
 npm test
 ```
 
-For generated OBJ bundles, also check `.assembly-report.json` summaries, texture map existence in the MTL, and final OBJ counts (`v`, `vt`, `vn`, `f`) when Live Home 3D performance matters.
+For generated OBJ bundles, also check `.assembly-report.json` summaries, texture map existence in the MTL, isolated `procedural_worktop` and `procedural_plinth` previews, and final OBJ counts (`v`, `vt`, `vn`, `f`) when Live Home 3D performance matters.

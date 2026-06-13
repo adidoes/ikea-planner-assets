@@ -86,6 +86,7 @@ program
   .option("--instance <uuidOrDbId>", "Furniture uuid or dbId to assemble; defaults to the first placed furniture")
   .option("--whole", "Assemble every placed furniture item into one whole-project OBJ")
   .option("--worktops", "Include procedural worktop/countertop slabs from planner linear worktop data")
+  .option("--plinths", "Include procedural plinth/toe-kick strips from planner linear plinth data")
   .option("--flat", "Write one flat OBJ object without per-part o/g records")
   .option("--proxy-over-faces <n>", "Replace child OBJ parts above this face count with lightweight bounding-box proxies", parseInteger)
   .option("--internal-parts <mode>", "How to handle hidden/internal cabinet parts: keep, proxy, or omit", "keep")
