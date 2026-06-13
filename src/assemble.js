@@ -83,6 +83,7 @@ async function assembleInputs(bmprojPath, assetMapPath, options) {
     summary: {
       leaves: context.leaves.length,
       proceduralWorktops: context.proceduralWorktops.length,
+      worktopCornerBridges: context.proceduralWorktops.filter((slab) => slab.cornerBridge).length,
       operationCutouts: context.operationCutouts.length,
       internalLeaves: context.leaves.filter((leaf) => leaf.internalPart).length,
       omittedLeaves: context.leaves.filter((leaf) => leaf.omitted).length,
@@ -391,6 +392,7 @@ function collectProceduralWorktops(context) {
     slabs.push(...slabsForWorktop(context, worktop));
   }
   normalizeWorktopOverlaps(slabs);
+  addWorktopCornerBridges(slabs);
   return slabs;
 }
 
@@ -446,8 +448,115 @@ function trimWorktopOverlap(a, b) {
   return changed;
 }
 
+function addWorktopCornerBridges(slabs) {
+  const bridges = [];
+  const seen = new Set();
+  for (let i = 0; i < slabs.length; i++) {
+    for (let j = i + 1; j < slabs.length; j++) {
+      const bridge = worktopCornerBridge(slabs[i], slabs[j], bridges.length + 1);
+      if (!bridge) continue;
+      const key = [
+        bridge.primary.min.toFixed(3),
+        bridge.primary.max.toFixed(3),
+        bridge.secondary.min.toFixed(3),
+        bridge.secondary.max.toFixed(3),
+        bridge.altitude.toFixed(3),
+      ].join(":");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      bridges.push(bridge);
+    }
+  }
+  slabs.push(...bridges);
+}
+
+function worktopCornerBridge(a, b, index) {
+  if (a.orientation === b.orientation) return null;
+  if (Math.abs((a.altitude || 0) - (b.altitude || 0)) > 0.1) return null;
+  if (Math.abs((a.thickness || 0) - (b.thickness || 0)) > 0.1) return null;
+  if (a.materialDbId && b.materialDbId && a.materialDbId !== b.materialDbId) return null;
+
+  const rectA = worktopWorldRect(a);
+  const rectB = worktopWorldRect(b);
+  const xOverlap = overlapRange(rectA.x, rectB.x);
+  const yOverlap = overlapRange(rectA.y, rectB.y);
+  const xGap = gapRange(rectA.x, rectB.x);
+  const yGap = gapRange(rectA.y, rectB.y);
+  const maxJoinGap = 120;
+  const minSharedEdge = 100;
+  const minBridgeWidth = 5;
+  let primary = null;
+  let secondary = null;
+
+  if (xOverlap.size >= minSharedEdge && yGap && yGap.size <= maxJoinGap) {
+    primary = { min: xOverlap.min, max: xOverlap.max };
+    secondary = { min: yGap.min, max: yGap.max };
+  } else if (yOverlap.size >= minSharedEdge && xGap && xGap.size <= maxJoinGap) {
+    primary = { min: xGap.min, max: xGap.max };
+    secondary = { min: yOverlap.min, max: yOverlap.max };
+  }
+  if (!primary || !secondary) return null;
+  if (primary.max - primary.min < minBridgeWidth || secondary.max - secondary.min < minBridgeWidth) return null;
+
+  const axes = canonicalAxes("x");
+  return {
+    uuid: `${a.uuid || "worktop"}__corner_bridge_${index}`,
+    materialDbId: a.materialDbId || b.materialDbId || null,
+    label: `Worktop corner bridge ${index}`,
+    altitude: Number(a.altitude) || Number(b.altitude) || 882,
+    thickness: Number(a.thickness) || Number(b.thickness) || 20,
+    orientation: "x",
+    furnitureIDs: uniqueStrings([...(a.furnitureIDs || []), ...(b.furnitureIDs || [])]),
+    sourceFurnitureIDs: uniqueStrings([...(a.sourceFurnitureIDs || []), ...(b.sourceFurnitureIDs || [])]),
+    size: {
+      width: primary.max - primary.min,
+      depth: secondary.max - secondary.min,
+      thickness: Number(a.thickness) || Number(b.thickness) || 20,
+    },
+    axes,
+    primary,
+    secondary,
+    cutouts: [],
+    points: rectanglePoints(axes.u, axes.v, primary, secondary),
+    cornerBridge: true,
+    bridgeReason: "small perpendicular worktop join gap",
+    sourceSlabs: [a.label || a.uuid || null, b.label || b.uuid || null].filter(Boolean),
+  };
+}
+
+function worktopWorldRect(slab) {
+  const points = slab.points?.length ? slab.points : rectanglePoints(
+    (slab.axes || axesFromOrientation(slab.orientation)).u,
+    (slab.axes || axesFromOrientation(slab.orientation)).v,
+    slab.primary,
+    slab.secondary,
+  );
+  const xs = points.map((point) => point[0]);
+  const ys = points.map((point) => point[1]);
+  return {
+    x: { min: Math.min(...xs), max: Math.max(...xs) },
+    y: { min: Math.min(...ys), max: Math.max(...ys) },
+  };
+}
+
 function rangeOverlap(a, b) {
   return Math.min(a.max, b.max) - Math.max(a.min, b.min);
+}
+
+function overlapRange(a, b) {
+  const min = Math.max(a.min, b.min);
+  const max = Math.min(a.max, b.max);
+  return { min, max, size: Math.max(0, max - min) };
+}
+
+function gapRange(a, b) {
+  if (a.max < b.min) return { min: a.max, max: b.min, size: b.min - a.max };
+  if (b.max < a.min) return { min: b.max, max: a.min, size: a.min - b.max };
+  return null;
+}
+
+function uniqueStrings(values) {
+  return Array.from(new Set(values.filter(Boolean)));
 }
 
 function refreshWorktopSlabGeometry(slab) {
