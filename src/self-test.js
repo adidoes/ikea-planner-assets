@@ -7,6 +7,7 @@ const zlib = require("node:zlib");
 const { promisify } = require("node:util");
 const assert = require("node:assert/strict");
 const { assembleInputs } = require("./assemble");
+const { materialExportProfile } = require("./convert");
 const { extractEntries } = require("./import-requests");
 const { inspectOne } = require("./inspect");
 
@@ -38,6 +39,15 @@ async function runSelfTest() {
   assert.equal(result.kind, "brotli");
   assert.equal(result.decodedKind, "json");
   assert.ok(result.decodedPath);
+
+  const chromeProfile = materialExportProfile({
+    color: [0, 0, 0],
+    specular: [0.843137, 0.843137, 0.831373],
+    shininess: 245,
+  });
+  assert.equal(chromeProfile.source, "chrome-phong-fallback");
+  assert.equal(chromeProfile.metallicFactor, 1);
+  assert.ok(chromeProfile.baseColor.every((channel) => channel > 0.6), "chrome Phong materials should export with visible diffuse color");
 
   await runAssemblyGeometryTests(temp);
 

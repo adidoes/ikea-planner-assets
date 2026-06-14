@@ -153,8 +153,9 @@ async function writeObjFromBm3(manifest, binary, options) {
 
   for (let i = 0; i < (manifest.materials || []).length || i === 0; i++) {
     const material = (manifest.materials || [])[i] || {};
+    const profile = materialExportProfile(material);
     const name = objMaterialName(i);
-    const color = material.color || [0.8, 0.8, 0.8];
+    const color = profile.baseColor;
     const specular = material.specular || [0.1, 0.1, 0.1];
     mtl.push(`newmtl ${name}`);
     mtl.push(`Kd ${color[0] || 0} ${color[1] || 0} ${color[2] || 0}`);
@@ -389,12 +390,13 @@ function buildGlbFromBm3(manifest, binary, options) {
   }
 
   for (const material of manifest.materials || []) {
+    const profile = materialExportProfile(material);
     const pbr = {
       baseColorFactor: [
-        ...(material.color || [0.8, 0.8, 0.8]).slice(0, 3),
+        ...profile.baseColor.slice(0, 3),
         material.opacity == null ? 1 : material.opacity,
       ],
-      metallicFactor: 0,
+      metallicFactor: profile.metallicFactor,
       roughnessFactor: phongShininessToRoughness(material.shininess),
     };
     if (material.diffuseMap != null) pbr.baseColorTexture = { index: material.diffuseMap };
@@ -572,6 +574,32 @@ function phongShininessToRoughness(shininess) {
   return Math.max(0.05, Math.min(1, Math.sqrt(2 / (shininess + 2))));
 }
 
+function materialExportProfile(material = {}) {
+  const sourceColor = material.color || [0.8, 0.8, 0.8];
+  const specular = material.specular || [0.1, 0.1, 0.1];
+  const colorMax = Math.max(...sourceColor.slice(0, 3).map((value) => Number(value) || 0));
+  const specularAvg = average3(specular);
+  const shiny = Number(material.shininess) || 0;
+  const chromeLike = colorMax <= 0.02 && specularAvg >= 0.45 && shiny >= 100 && material.diffuseMap == null;
+  if (chromeLike) {
+    return {
+      baseColor: [0.72, 0.72, 0.69],
+      metallicFactor: 1,
+      source: "chrome-phong-fallback",
+    };
+  }
+  return {
+    baseColor: sourceColor,
+    metallicFactor: 0,
+    source: "bm3-material",
+  };
+}
+
+function average3(values) {
+  const nums = values.slice(0, 3).map((value) => Number(value) || 0);
+  return nums.reduce((sum, value) => sum + value, 0) / Math.max(1, nums.length);
+}
+
 async function normalizeGltf(file, options) {
   try {
     const io = new NodeIO();
@@ -591,4 +619,4 @@ async function copyAsExport(file, options, note) {
   return { path: file, ok: true, output: target, format: path.extname(file).slice(1).toLowerCase(), note };
 }
 
-module.exports = { convertInputs };
+module.exports = { convertInputs, materialExportProfile };
