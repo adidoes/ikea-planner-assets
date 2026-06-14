@@ -448,13 +448,123 @@ function collectLinearInstances(project, type) {
 }
 
 function collectProceduralWorktops(context) {
+  const embedded = collectEmbeddedWorktopSlabs(context);
+  if (embedded.length) return embedded;
+
   const slabs = [];
   for (const worktop of collectWorktopLinears(context.project)) {
     slabs.push(...slabsForWorktop(context, worktop));
   }
   normalizeWorktopOverlaps(slabs);
+  alignWorktopCornerEdges(slabs);
+  trimPerpendicularWorktopOverlaps(slabs);
   addWorktopCornerBridges(slabs);
   return slabs;
+}
+
+function collectEmbeddedWorktopSlabs(context) {
+  const linears = collectLinearInstances(context.project, "Worktop");
+  const worktops = collectWorktopLinears(context.project);
+  const slabs = [];
+  linears.forEach((linear, linearIndex) => {
+    const worktop = worktops[linearIndex] || null;
+    const materialDbId = dbIdFromValue(paramsFromConfig(linear.parametersConfig).Default) || worktop?.productInfoDbId || null;
+    const thickness = Number(worktop?.thickness) || Number(worktop?.parameters?.height?.value) || 20;
+    const altitude = embeddedWorktopAltitude(context, worktop, linear);
+    const sketches = linear.embedResourceInfo?.designTree?.sketches || [];
+    sketches.forEach((entry, sketchIndex) => {
+      const sketch = entry.sketch || entry;
+      const polygon = orderedSketchPolygon(sketch);
+      if (polygon.length < 3) return;
+      const rect = rectFromPoints(polygon);
+      slabs.push({
+        uuid: `${worktop?.uuid || linear.uuid}_board_${sketchIndex + 1}`,
+        materialDbId,
+        label: `Worktop ${linearIndex + 1}.${sketchIndex + 1}`,
+        altitude,
+        thickness,
+        furnitureIDs: worktop?.furnitureIDs || [],
+        sourceFurnitureIDs: worktop?.furnitureIDs || [],
+        size: {
+          width: rect.x.max - rect.x.min,
+          depth: rect.y.max - rect.y.min,
+          thickness,
+        },
+        axes: canonicalAxes("x"),
+        primary: { min: rect.x.min, max: rect.x.max },
+        secondary: { min: rect.y.min, max: rect.y.max },
+        cutouts: [],
+        points: polygon,
+        polygon,
+        embeddedWorktopSketch: true,
+        embeddedFurnitureUuid: linear.uuid,
+        sketchIndex,
+      });
+    });
+  });
+  return slabs;
+}
+
+function embeddedWorktopAltitude(context, worktop, linear) {
+  const linearZ = Number(linear?.transfo?.[14]);
+  const base = Number(worktop?.altitude) || (Number.isFinite(linearZ) ? linearZ : 882);
+  const furnitureTop = Math.max(
+    ...((worktop?.furnitureIDs || [])
+      .map((uuid) => context.furnitureByUuid.get(uuid))
+      .map((item) => item ? bboxWorldMaxZ(item.boundingBox, item.transfo || identityMatrix()) : null)
+      .filter(Number.isFinite)),
+  );
+  return Math.max(base, Number.isFinite(furnitureTop) ? furnitureTop : base);
+}
+
+function orderedSketchPolygon(sketch) {
+  const edges = (sketch?.edges || [])
+    .filter((edge) => edge.type === "EdgeLine" && edge.vertices?.length >= 2)
+    .map((edge) => ({
+      a: [Number(edge.vertices[0].x), Number(edge.vertices[0].y)],
+      b: [Number(edge.vertices[1].x), Number(edge.vertices[1].y)],
+    }))
+    .filter((edge) => edge.a.every(Number.isFinite) && edge.b.every(Number.isFinite));
+  if (!edges.length) return [];
+
+  const unused = edges.slice();
+  const first = unused.shift();
+  const points = [first.a, first.b];
+  const samePoint = (a, b) => distance2(a, b) <= 1;
+  while (unused.length) {
+    const tail = points[points.length - 1];
+    const index = unused.findIndex((edge) => samePoint(edge.a, tail) || samePoint(edge.b, tail));
+    if (index < 0) break;
+    const [edge] = unused.splice(index, 1);
+    points.push(samePoint(edge.a, tail) ? edge.b : edge.a);
+    if (points.length > 3 && samePoint(points[0], points[points.length - 1])) break;
+  }
+  if (points.length > 1 && samePoint(points[0], points[points.length - 1])) points.pop();
+  return removeCollinearPoints(points);
+}
+
+function removeCollinearPoints(points) {
+  if (points.length <= 3) return points;
+  const out = [];
+  for (let i = 0; i < points.length; i++) {
+    const prev = points[(i + points.length - 1) % points.length];
+    const curr = points[i];
+    const next = points[(i + 1) % points.length];
+    const a = [curr[0] - prev[0], curr[1] - prev[1]];
+    const b = [next[0] - curr[0], next[1] - curr[1]];
+    const cross = a[0] * b[1] - a[1] * b[0];
+    if (Math.abs(cross) > 0.001) out.push(curr);
+  }
+  return out;
+}
+
+function rectFromPoints(points) {
+  const xs = points.map((point) => point[0]);
+  const ys = points.map((point) => point[1]);
+  return {
+    x: { min: Math.min(...xs), max: Math.max(...xs) },
+    y: { min: Math.min(...ys), max: Math.max(...ys) },
+  };
 }
 
 function collectProceduralPlinths(context) {
@@ -585,6 +695,193 @@ function trimWorktopOverlap(a, b) {
   return changed;
 }
 
+function alignWorktopCornerEdges(slabs) {
+  for (let i = 0; i < slabs.length; i++) {
+    for (let j = i + 1; j < slabs.length; j++) {
+      alignWorktopCornerEdge(slabs[i], slabs[j]);
+    }
+  }
+  for (const slab of slabs) refreshWorktopSlabGeometry(slab);
+}
+
+function alignWorktopCornerEdge(a, b) {
+  if (a.orientation === b.orientation) return;
+  if (Math.abs((a.altitude || 0) - (b.altitude || 0)) > 0.1) return;
+  if (Math.abs((a.thickness || 0) - (b.thickness || 0)) > 0.1) return;
+  if (a.materialDbId && b.materialDbId && a.materialDbId !== b.materialDbId) return;
+
+  const rectA = worktopWorldRect(a);
+  const rectB = worktopWorldRect(b);
+  const overlapX = overlapRange(rectA.x, rectB.x);
+  const overlapY = overlapRange(rectA.y, rectB.y);
+  const touchesX = overlapX.size >= 100 || (rangeDistance(rectA.x, rectB.x) <= 5 && overlapY.size >= 100);
+  const touchesY = overlapY.size >= 100 || (rangeDistance(rectA.y, rectB.y) <= 5 && overlapX.size >= 100);
+  if (!touchesX && !touchesY) return;
+
+  const maxOffset = 40;
+  let changed = false;
+  for (const axis of ["x", "y"]) {
+    if (axis === "x" && !touchesY) continue;
+    if (axis === "y" && !touchesX) continue;
+    for (const side of ["min", "max"]) {
+      const offset = Math.abs(rectA[axis][side] - rectB[axis][side]);
+      if (offset <= 1 || offset > maxOffset) continue;
+      const target = side === "min"
+        ? Math.min(rectA[axis][side], rectB[axis][side])
+        : Math.max(rectA[axis][side], rectB[axis][side]);
+      if (setWorktopWorldEdge(a, axis, side, target)) changed = true;
+      if (setWorktopWorldEdge(b, axis, side, target)) changed = true;
+    }
+  }
+  if (changed) {
+    a.cornerEdgeFixes = (a.cornerEdgeFixes || 0) + 1;
+    b.cornerEdgeFixes = (b.cornerEdgeFixes || 0) + 1;
+  }
+}
+
+function setWorktopWorldEdge(slab, axis, side, value) {
+  if (!slab.primary || !slab.secondary || !Number.isFinite(value)) return false;
+  const before = JSON.stringify([slab.primary, slab.secondary]);
+  if (axis === "x" && slab.orientation === "x") {
+    slab.primary[side] = value;
+  } else if (axis === "x") {
+    if (side === "min") slab.secondary.max = -value;
+    else slab.secondary.min = -value;
+  } else if (slab.orientation === "x") {
+    slab.secondary[side] = value;
+  } else {
+    slab.primary[side] = value;
+  }
+  return before !== JSON.stringify([slab.primary, slab.secondary]);
+}
+
+function trimPerpendicularWorktopOverlaps(slabs) {
+  const additions = [];
+  for (let pass = 0; pass < 3; pass++) {
+    let changed = false;
+    for (let i = 0; i < slabs.length; i++) {
+      for (let j = i + 1; j < slabs.length; j++) {
+        changed = trimPerpendicularWorktopOverlap(slabs[i], slabs[j], additions) || changed;
+      }
+    }
+    if (!changed) break;
+  }
+  slabs.push(...additions);
+  for (const slab of slabs) refreshWorktopSlabGeometry(slab);
+}
+
+function trimPerpendicularWorktopOverlap(a, b, additions) {
+  if (a.orientation === b.orientation) return false;
+  if (Math.abs((a.altitude || 0) - (b.altitude || 0)) > 0.1) return false;
+  if (Math.abs((a.thickness || 0) - (b.thickness || 0)) > 0.1) return false;
+  if (a.materialDbId && b.materialDbId && a.materialDbId !== b.materialDbId) return false;
+
+  const rectA = worktopWorldRect(a);
+  const rectB = worktopWorldRect(b);
+  const overlapX = overlapRange(rectA.x, rectB.x);
+  const overlapY = overlapRange(rectA.y, rectB.y);
+  if (overlapX.size <= 1 || overlapY.size <= 1) return false;
+
+  const axis = overlapY.size <= overlapX.size ? "y" : "x";
+  const lower = rectA[axis].min <= rectB[axis].min
+    ? { slab: a, rect: rectA, other: rectB }
+    : { slab: b, rect: rectB, other: rectA };
+  const target = lower.other[axis].min;
+  if (target <= lower.rect[axis].min + 50 || target >= lower.rect[axis].max - 1) return false;
+
+  const remainderRects = worktopOverlapRemainderRects(lower.rect, lower.other, axis, target);
+  if (isFreestandingFillerWorktop(lower.slab)) {
+    const shift = target - lower.rect[axis].max - freestandingFillerInset(lower.slab);
+    const changed = translateWorktopWorld(lower.slab, axis, shift);
+    if (changed) {
+      lower.slab.freestandingFillerOffset = { axis, amount: shift };
+      lower.slab.cornerOverlapFixes = (lower.slab.cornerOverlapFixes || 0) + 1;
+    }
+    return changed;
+  }
+
+  const changed = setWorktopWorldEdge(lower.slab, axis, "max", target);
+  if (changed) {
+    lower.slab.cornerOverlapFixes = (lower.slab.cornerOverlapFixes || 0) + 1;
+    const remainders = remainderRects.map((rect) => worktopRemainderSlab(lower.slab, rect, additions.length + 1));
+    additions.push(...remainders);
+  }
+  return changed;
+}
+
+function isFreestandingFillerWorktop(slab) {
+  const text = [
+    ...(slab.furnitureLabels || []),
+    ...(slab.furnitureDbIds || []),
+  ].join(" ").toLowerCase();
+  return text.includes("freestanding filler") || text.includes("asm-42461142");
+}
+
+function freestandingFillerInset(slab) {
+  const values = [];
+  for (const params of slab.furnitureParams || []) {
+    values.push(numericParameter(params.leftWidth));
+    values.push(numericParameter(params.rightWidth));
+  }
+  const width = median(values.filter((value) => Number.isFinite(value) && value > 0));
+  return (width || 75) / 2;
+}
+
+function translateWorktopWorld(slab, axis, delta) {
+  if (!Number.isFinite(delta) || Math.abs(delta) < 0.001) return false;
+  refreshWorktopSlabGeometry(slab);
+  const rect = worktopWorldRect(slab);
+  const changedMin = setWorktopWorldEdge(slab, axis, "min", rect[axis].min + delta);
+  const changedMax = setWorktopWorldEdge(slab, axis, "max", rect[axis].max + delta);
+  refreshWorktopSlabGeometry(slab);
+  return changedMin || changedMax;
+}
+
+function worktopOverlapRemainderRects(rect, other, axis, target) {
+  const overlapX = overlapRange(rect.x, other.x);
+  const overlapY = overlapRange(rect.y, other.y);
+  const remainderAxis = axis === "y" ? "x" : "y";
+  const overlap = remainderAxis === "x" ? overlapX : overlapY;
+  const source = rect[remainderAxis];
+  const sideRanges = [
+    { min: source.min, max: overlap.min },
+    { min: overlap.max, max: source.max },
+  ].filter((range) => range.max - range.min > 5);
+  const trimmedRange = { min: target, max: rect[axis].max };
+  if (trimmedRange.max - trimmedRange.min <= 5) return [];
+  return sideRanges.map((range) => axis === "y"
+    ? { x: range, y: trimmedRange }
+    : { x: trimmedRange, y: range });
+}
+
+function worktopRemainderSlab(source, rect, index) {
+  const axes = canonicalAxes("x");
+  return {
+    uuid: `${source.uuid || "worktop"}__corner_overlap_remainder_${index}`,
+    materialDbId: source.materialDbId || null,
+    label: `${source.label || "Worktop"} corner remainder ${index}`,
+    altitude: Number(source.altitude) || 882,
+    thickness: Number(source.thickness) || 20,
+    orientation: "x",
+    furnitureIDs: source.furnitureIDs || [],
+    furnitureDbIds: source.furnitureDbIds || [],
+    furnitureLabels: source.furnitureLabels || [],
+    sourceFurnitureIDs: source.sourceFurnitureIDs || source.furnitureIDs || [],
+    size: {
+      width: rect.x.max - rect.x.min,
+      depth: rect.y.max - rect.y.min,
+      thickness: Number(source.thickness) || 20,
+    },
+    axes,
+    primary: { min: rect.x.min, max: rect.x.max },
+    secondary: { min: rect.y.min, max: rect.y.max },
+    cutouts: [],
+    points: rectanglePoints(axes.u, axes.v, rect.x, rect.y),
+    cornerOverlapRemainder: true,
+    sourceSlab: source.label || source.uuid || null,
+  };
+}
+
 function addWorktopCornerBridges(slabs) {
   const bridges = [];
   const seen = new Set();
@@ -609,6 +906,7 @@ function addWorktopCornerBridges(slabs) {
 
 function worktopCornerBridge(a, b, index) {
   if (a.orientation === b.orientation) return null;
+  if (a.freestandingFillerOffset || b.freestandingFillerOffset) return null;
   if (Math.abs((a.altitude || 0) - (b.altitude || 0)) > 0.1) return null;
   if (Math.abs((a.thickness || 0) - (b.thickness || 0)) > 0.1) return null;
   if (a.materialDbId && b.materialDbId && a.materialDbId !== b.materialDbId) return null;
@@ -692,6 +990,11 @@ function gapRange(a, b) {
   return null;
 }
 
+function rangeDistance(a, b) {
+  const gap = gapRange(a, b);
+  return gap ? gap.size : 0;
+}
+
 function uniqueStrings(values) {
   return Array.from(new Set(values.filter(Boolean)));
 }
@@ -725,6 +1028,10 @@ function slabsForWorktop(context, worktop) {
   const dominantCount = Math.max(...Array.from(byOrientation.values()).map((group) => group.length));
   const hasCorner = byOrientation.size > 1;
   const slabs = [];
+  const altitude = Math.max(
+    Number(worktop.altitude) || 882,
+    ...items.map((item) => item.topZ).filter(Number.isFinite),
+  );
 
   for (const [key, oriented] of byOrientation) {
     const axes = canonicalAxes(key, oriented[0]);
@@ -732,14 +1039,15 @@ function slabsForWorktop(context, worktop) {
     const cluster = clusters.sort((a, b) => clusterScore(b, axes.u) - clusterScore(a, axes.u))[0];
     if (!cluster?.length) continue;
 
-    const primaryItems = hasCorner && oriented.length === dominantCount ? items : cluster;
+    const primaryItems = hasCorner && oriented.length > 1 && oriented.length === dominantCount ? items : cluster;
     const primary = extentAlong(primaryItems, axes.u);
     const depth = median(cluster.map((item) => item.depth)) || Number(worktop.parameters?.depth?.value) || 635;
     const targetDepth = depth + 35;
     const secondaryCenter = median(cluster.map((item) => dot2(item.center, axes.v)));
     const secondary = { min: secondaryCenter - targetDepth / 2, max: secondaryCenter + targetDepth / 2 };
-    const startOverhang = Number(worktop.startOverhang) || 0;
-    const endOverhang = Number(worktop.endOverhang) || 0;
+    const applyEndOverhang = !hasCorner || oriented.length > 1;
+    const startOverhang = applyEndOverhang ? Number(worktop.startOverhang) || 0 : 0;
+    const endOverhang = applyEndOverhang ? Number(worktop.endOverhang) || 0 : 0;
     primary.min -= startOverhang;
     primary.max += endOverhang;
 
@@ -747,10 +1055,13 @@ function slabsForWorktop(context, worktop) {
       uuid: worktop.uuid,
       materialDbId: worktop.productInfoDbId || null,
       label: `Worktop ${slabs.length + 1}`,
-      altitude: Number(worktop.altitude) || 882,
+      altitude,
       thickness: Number(worktop.thickness) || 20,
       orientation: key,
       furnitureIDs: cluster.map((item) => item.uuid),
+      furnitureDbIds: cluster.map((item) => item.dbId).filter(Boolean),
+      furnitureLabels: cluster.map((item) => item.label).filter(Boolean),
+      furnitureParams: cluster.map((item) => item.params).filter(Boolean),
       sourceFurnitureIDs: worktop.furnitureIDs,
       size: {
         width: primary.max - primary.min,
@@ -867,12 +1178,53 @@ function worktopFootprint(item) {
   const center = [matrix[12] || 0, matrix[13] || 0];
   const width = numericParameter(params.width) || bboxSize(item.boundingBox, "x") || 0;
   const depth = numericParameter(params.depth) || bboxSize(item.boundingBox, "y") || 0;
-  return { center, xAxis, yAxis, width, depth };
+  const corners = asymmetricFootprintCorners(item, matrix);
+  const topZ = bboxWorldMaxZ(item.boundingBox, matrix);
+  return { center, xAxis, yAxis, width, depth, corners, topZ };
 }
 
 function bboxSize(box, axis) {
   if (!box?.min || !box?.max) return 0;
   return Math.abs((box.max[axis] || 0) - (box.min[axis] || 0));
+}
+
+function bboxWorldMaxZ(box, matrix) {
+  if (!box?.min || !box?.max) return null;
+  const xs = [Number(box.min.x), Number(box.max.x)];
+  const ys = [Number(box.min.y), Number(box.max.y)];
+  const zs = [Number(box.min.z), Number(box.max.z)];
+  if (![...xs, ...ys, ...zs].every(Number.isFinite)) return null;
+  let maxZ = -Infinity;
+  for (const x of xs) {
+    for (const y of ys) {
+      for (const z of zs) {
+        maxZ = Math.max(maxZ, transformPointMm(matrix, [x, y, z])[2]);
+      }
+    }
+  }
+  return Number.isFinite(maxZ) ? maxZ : null;
+}
+
+function asymmetricFootprintCorners(item, matrix) {
+  const box = item.boundingBox;
+  if (!box?.min || !box?.max) return null;
+  const minX = Number(box.min.x), maxX = Number(box.max.x);
+  const minY = Number(box.min.y), maxY = Number(box.max.y);
+  if (![minX, maxX, minY, maxY].every(Number.isFinite)) return null;
+  const centerOffset = Math.hypot((minX + maxX) / 2, (minY + maxY) / 2);
+  const params = paramsFromConfig(item.parametersConfig);
+  const width = numericParameter(params.width);
+  const depth = numericParameter(params.depth);
+  const boxWidth = maxX - minX;
+  const boxDepth = maxY - minY;
+  const paramMismatch = (width && boxWidth > width * 2) || (depth && boxDepth > depth * 1.5);
+  if (centerOffset < 50 && !paramMismatch) return null;
+  return [
+    transformPointMm(matrix, [minX, minY, 0]).slice(0, 2),
+    transformPointMm(matrix, [maxX, minY, 0]).slice(0, 2),
+    transformPointMm(matrix, [maxX, maxY, 0]).slice(0, 2),
+    transformPointMm(matrix, [minX, maxY, 0]).slice(0, 2),
+  ];
 }
 
 function orientationKey(axis) {
@@ -914,6 +1266,7 @@ function extentAlong(items, axis) {
 }
 
 function footprintCorners(item) {
+  if (Array.isArray(item.corners) && item.corners.length) return item.corners;
   const x = mul2(item.xAxis, item.width / 2);
   const y = mul2(item.yAxis, item.depth / 2);
   return [
@@ -1349,6 +1702,10 @@ async function plinthMaterial(context, outDir) {
 }
 
 function appendWorktopSlab(obj, slab, material, vertexBase, uvBase, normalBase, context) {
+  if (slab.polygon?.length >= 3) {
+    return appendPolygonWorktopSlab(obj, slab, material, vertexBase, uvBase, normalBase, context);
+  }
+
   const materialName = material.name;
   const bottomZ = slab.altitude;
   const topZ = slab.altitude + slab.thickness;
@@ -1418,6 +1775,94 @@ function appendWorktopSlab(obj, slab, material, vertexBase, uvBase, normalBase, 
   }
 
   return counts;
+}
+
+function appendPolygonWorktopSlab(obj, slab, material, vertexBase, uvBase, normalBase, context) {
+  const materialName = material.name;
+  const bottomZ = slab.altitude;
+  const topZ = slab.altitude + slab.thickness;
+  const polygon = slab.polygon || slab.points || [];
+  const rect = rectFromPoints(polygon);
+  const primary = slab.primary || { min: rect.x.min, max: rect.x.max };
+  const secondary = slab.secondary || { min: rect.y.min, max: rect.y.max };
+  const cutouts = clippedCutoutRects(slab.cutouts || [], primary, secondary);
+  const xs = sortedUnique([
+    ...polygon.map((point) => point[0]),
+    ...cutouts.flatMap((cutout) => [cutout.minU, cutout.maxU]),
+  ]);
+  const ys = sortedUnique([
+    ...polygon.map((point) => point[1]),
+    ...cutouts.flatMap((cutout) => [cutout.minV, cutout.maxV]),
+  ]);
+  const counts = { v: 0, vt: 0, vn: 0 };
+
+  obj.push("");
+  if (!context.flat) obj.push(`g procedural_${sanitizeObjName(slab.label)}_${sanitizeObjName(slab.uuid)}`);
+  obj.push(`# Procedural worktop: ${slab.uuid} ${slab.size.width.toFixed(1)}x${slab.size.depth.toFixed(1)}x${slab.size.thickness.toFixed(1)}mm`);
+  obj.push("# Source: IKEA embedded worktop sketch");
+  if (cutouts.length) obj.push(`# Cutouts: ${cutouts.map((cutout) => `${cutout.kind}:${cutout.label}`).join("; ")}`);
+  obj.push(`usemtl ${materialName}`);
+
+  const point = (u, v, z) => orientPoint([u * context.scale, v * context.scale, z * context.scale], context.axis);
+  const uv = (u, v) => worktopUv(u, v, primary, secondary, material, context.scale);
+  const addQuad = (vertices, uvs) => {
+    const vStart = vertexBase + counts.v + 1;
+    const vtStart = uvBase + counts.vt + 1;
+    const vnIndex = normalBase + counts.vn + 1;
+    for (const vertex of vertices) obj.push(`v ${vertex[0]} ${vertex[1]} ${vertex[2]}`);
+    for (const vt of uvs) obj.push(`vt ${vt[0]} ${vt[1]}`);
+    const n = normalForQuad(vertices);
+    obj.push(`vn ${n[0]} ${n[1]} ${n[2]}`);
+    obj.push(`f ${[0, 1, 2].map((index) => `${vStart + index}/${vtStart + index}/${vnIndex}`).join(" ")}`);
+    obj.push(`f ${[0, 2, 3].map((index) => `${vStart + index}/${vtStart + index}/${vnIndex}`).join(" ")}`);
+    counts.v += 4;
+    counts.vt += 4;
+    counts.vn += 1;
+  };
+
+  for (let xi = 0; xi < xs.length - 1; xi++) {
+    for (let yi = 0; yi < ys.length - 1; yi++) {
+      const minU = xs[xi], maxU = xs[xi + 1], minV = ys[yi], maxV = ys[yi + 1];
+      const centerU = (minU + maxU) / 2;
+      const centerV = (minV + maxV) / 2;
+      if (!pointInPolygon2([centerU, centerV], polygon)) continue;
+      if (cutouts.some((cutout) => rectContains(cutout, centerU, centerV))) continue;
+      addQuad(
+        [point(minU, minV, topZ), point(maxU, minV, topZ), point(maxU, maxV, topZ), point(minU, maxV, topZ)],
+        [uv(minU, minV), uv(maxU, minV), uv(maxU, maxV), uv(minU, maxV)],
+      );
+      addQuad(
+        [point(minU, maxV, bottomZ), point(maxU, maxV, bottomZ), point(maxU, minV, bottomZ), point(minU, minV, bottomZ)],
+        [uv(minU, maxV), uv(maxU, maxV), uv(maxU, minV), uv(minU, minV)],
+      );
+    }
+  }
+
+  const clockwise = polygonSignedArea(polygon) < 0;
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+    const vertices = clockwise
+      ? [point(a[0], a[1], bottomZ), point(b[0], b[1], bottomZ), point(b[0], b[1], topZ), point(a[0], a[1], topZ)]
+      : [point(b[0], b[1], bottomZ), point(a[0], a[1], bottomZ), point(a[0], a[1], topZ), point(b[0], b[1], topZ)];
+    addQuad(vertices, [uv(a[0], a[1]), uv(b[0], b[1]), uv(b[0], b[1]), uv(a[0], a[1])]);
+  }
+
+  for (const cutout of cutouts) {
+    addPolygonVerticalRect(addQuad, point, uv, cutout.minU, cutout.minU, cutout.maxV, cutout.minV, bottomZ, topZ);
+    addPolygonVerticalRect(addQuad, point, uv, cutout.maxU, cutout.maxU, cutout.minV, cutout.maxV, bottomZ, topZ);
+    addPolygonVerticalRect(addQuad, point, uv, cutout.minU, cutout.maxU, cutout.minV, cutout.minV, bottomZ, topZ);
+    addPolygonVerticalRect(addQuad, point, uv, cutout.maxU, cutout.minU, cutout.maxV, cutout.maxV, bottomZ, topZ);
+  }
+
+  return counts;
+}
+
+function addPolygonVerticalRect(addQuad, point, uv, u1, u2, v1, v2, bottomZ, topZ) {
+  addQuad(
+    [point(u1, v1, bottomZ), point(u1, v1, topZ), point(u2, v2, topZ), point(u2, v2, bottomZ)],
+    [uv(u1, v1), uv(u1, v1), uv(u2, v2), uv(u2, v2)],
+  );
 }
 
 function appendPlinthSegment(obj, segment, material, vertexBase, uvBase, normalBase, context) {
@@ -1523,6 +1968,28 @@ function sortedUnique(values) {
 
 function rectContains(rect, u, v) {
   return u > rect.minU && u < rect.maxU && v > rect.minV && v < rect.maxV;
+}
+
+function pointInPolygon2(point, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][0], yi = polygon[i][1];
+    const xj = polygon[j][0], yj = polygon[j][1];
+    const intersects = ((yi > point[1]) !== (yj > point[1])) &&
+      point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi || Number.EPSILON) + xi;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function polygonSignedArea(polygon) {
+  let area = 0;
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+    area += a[0] * b[1] - b[0] * a[1];
+  }
+  return area / 2;
 }
 
 function axesFromOrientation(orientation) {

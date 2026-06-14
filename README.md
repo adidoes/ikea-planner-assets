@@ -44,4 +44,6 @@ Captured `.BMA` files are product/assembly metadata. `.BM3MAT` files are materia
 
 `preview` renders fixed-angle PNG screenshots and a `.preview-report.json` for any OBJ/MTL bundle using Three.js and Playwright. Use `--only-material procedural_worktop` to isolate countertop geometry before importing a candidate into Live Home 3D.
 
+`npm test` runs smoke tests for request import/asset inspection plus synthetic assembly regressions for procedural worktop corner bridges, freestanding filler corner alignment, wall-side countertop edge extension, and procedural plinth path export.
+
 See [docs/FORMAT_NOTES.md](docs/FORMAT_NOTES.md) for current reverse-engineering notes.

@@ -6,6 +6,7 @@ const path = require("node:path");
 const zlib = require("node:zlib");
 const { promisify } = require("node:util");
 const assert = require("node:assert/strict");
+const { assembleInputs } = require("./assemble");
 const { extractEntries } = require("./import-requests");
 const { inspectOne } = require("./inspect");
 
@@ -38,7 +39,290 @@ async function runSelfTest() {
   assert.equal(result.decodedKind, "json");
   assert.ok(result.decodedPath);
 
+  await runAssemblyGeometryTests(temp);
+
   console.log("self-test ok");
+}
+
+async function runAssemblyGeometryTests(temp) {
+  const assetMapPath = path.join(temp, "asset-map.json");
+  const objDir = path.join(temp, "obj");
+  await fs.mkdir(objDir, { recursive: true });
+  await fs.writeFile(assetMapPath, JSON.stringify({ assets: [] }));
+
+  const alignedProjectPath = path.join(temp, "aligned-corner.BMPROJ");
+  await fs.writeFile(alignedProjectPath, JSON.stringify(cornerAlignmentProject()));
+  const aligned = await assembleInputs(alignedProjectPath, assetMapPath, {
+    objDir,
+    out: path.join(temp, "aligned-out"),
+    whole: true,
+    worktops: true,
+    flat: true,
+    axis: "y-up",
+    name: "aligned-corner",
+    internalParts: "omit",
+  });
+  const fillerSlabs = aligned.proceduralWorktops.filter((slab) => slab.furnitureIDs.includes("filler"));
+  const filler = aligned.proceduralWorktops.find((slab) => slab.embeddedWorktopSketch && worldRect(slab).y.min < 0);
+  const cabinet = aligned.proceduralWorktops.find((slab) => slab.embeddedWorktopSketch && worldRect(slab).y.max > 1000);
+  assert.ok(filler, "expected filler worktop slab");
+  assert.ok(cabinet, "expected cabinet worktop slab");
+  assert.equal(fillerSlabs.length, 2, "embedded IKEA worktop sketches should keep both board polygons associated with the linear");
+  assert.equal(aligned.proceduralWorktops.every((slab) => slab.embeddedWorktopSketch), true, "planner worktop sketches should override heuristic slab generation");
+  assertNear(unionRect([filler]).width, 690, "filler worktop should use IKEA's computed board width");
+  assertNear(unionRect([filler]).depth, 635, "filler worktop should use IKEA's computed board depth");
+  assertNear(unionRect([cabinet]).width, 635, "cabinet worktop should use IKEA's computed board width");
+  assertNear(unionRect([cabinet]).depth, 840, "cabinet worktop should use IKEA's computed board run length");
+  assert.ok(
+    aligned.proceduralWorktops.every((slab) => slab.altitude >= 882),
+    "worktops should sit on top of the highest associated furniture instead of intersecting cabinet geometry",
+  );
+  assertNear(worldRect(filler).x.max, worldRect(cabinet).x.max, "joined corner slabs should share the wall-side edge");
+  assertNear(worldRect(filler).x.min, 4490.959463715553, "filler board should preserve IKEA sketch min x");
+  assertNear(worldRect(filler).y.min, -193.0069974660873, "filler board should preserve IKEA sketch min y");
+  assertNear(worldRect(filler).y.max, 441.9930128157139, "filler board should preserve IKEA sketch max y");
+  assertNear(worldRect(cabinet).x.min, 4545.959471583366, "cabinet board should preserve IKEA sketch min x");
+  assertNear(worldRect(cabinet).y.min, 441.99301118510107, "cabinet board should preserve IKEA sketch min y");
+  assert.ok(rectOverlap(filler, cabinet).area < 0.01, "embedded corner slabs should meet at a seam without meaningful overlap");
+  assert.equal(aligned.summary.proceduralPlinths, 2);
+  assertNear(aligned.proceduralPlinths[0].height, 80, "plinth height");
+  assertNear(aligned.proceduralPlinths[0].thickness, 10, "plinth thickness");
+  assertNear(aligned.proceduralPlinths[0].length, 500, "first plinth path segment length");
+
+  const bridgeProjectPath = path.join(temp, "corner-bridge.BMPROJ");
+  await fs.writeFile(bridgeProjectPath, JSON.stringify(cornerBridgeProject()));
+  const bridged = await assembleInputs(bridgeProjectPath, assetMapPath, {
+    objDir,
+    out: path.join(temp, "bridge-out"),
+    whole: true,
+    worktops: true,
+    flat: true,
+    axis: "y-up",
+    name: "corner-bridge",
+    internalParts: "omit",
+  });
+  const bridge = bridged.proceduralWorktops.find((slab) => slab.cornerBridge);
+  assert.ok(bridge, "expected a procedural corner bridge for the small perpendicular gap");
+  assert.equal(bridged.summary.worktopCornerBridges, 1);
+  assertNear(bridge.size.depth, 57.5, "corner bridge should fill the 57.5mm join gap");
+}
+
+function cornerAlignmentProject() {
+  return projectWith({
+    furnitures: [
+      furniture("filler", "ASM-42461142-BE", [
+        -1, 1.4901161193847656e-8, 0, 0,
+        -1.4901161193847656e-8, -1, 0, 0,
+        0, 0, 1, 0,
+        4580.95947265625, 406.9930114746094, 0, 1,
+      ], { width: 100, depth: 600, leftWidth: 75, rightWidth: 75 }, {
+        min: { x: -600, y: -75, z: 80 },
+        max: { x: 75, y: 600, z: 880 },
+      }),
+      furniture("cabinet", "ASL-CABINET", [
+        -4.2862638516991895e-16, -1, 0, 0,
+        1, -4.2862638516991895e-16, 0, 0,
+        0, 0, 1, 0,
+        4880.95947265625, 881.9929809570312, 0, 1,
+      ], { width: 800, depth: 600 }, {
+        min: { x: -400, y: -350.5, z: 0 },
+        max: { x: 400.001, y: 300, z: 882 },
+      }),
+    ],
+    worktops: [{
+      uuid: "worktop-align",
+      furnitureIDs: ["filler", "cabinet"],
+      productInfoDbId: "MAT-WORKTOP",
+      startOverhang: 15,
+      endOverhang: 0,
+      thickness: 20,
+      altitude: 880,
+      parameters: { depth: { value: 635 } },
+    }],
+    plinths: [{
+      uuid: "plinth-linear",
+      furnitureIDs: ["filler", "cabinet"],
+      productInfoDbId: "MAT-PLINTH",
+      parameters: {
+        depth: { value: 10 },
+        height: { value: 80 },
+      },
+    }],
+    linearTypeMap: { "plinth-path": "Plinth", "worktop-linear": "Worktop" },
+    linearFurnitures: [plinthPathFurniture("plinth-path"), worktopSketchFurniture("worktop-linear")],
+  });
+}
+
+function cornerBridgeProject() {
+  return projectWith({
+    furnitures: [
+      furniture("x-run", "ASL-X", [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        300, 0, 0, 1,
+      ], { width: 600, depth: 600 }, {
+        min: { x: -300, y: -300, z: 0 },
+        max: { x: 300, y: 300, z: 880 },
+      }),
+      furniture("y-run", "ASL-Y", [
+        0, 1, 0, 0,
+        -1, 0, 0, 0,
+        0, 0, 1, 0,
+        300, 775, 0, 1,
+      ], { width: 800, depth: 600 }, {
+        min: { x: -400, y: -300, z: 0 },
+        max: { x: 400, y: 300, z: 880 },
+      }),
+    ],
+    worktops: [{
+      uuid: "worktop-bridge",
+      furnitureIDs: ["x-run", "y-run"],
+      productInfoDbId: "MAT-WORKTOP",
+      thickness: 20,
+      altitude: 880,
+      parameters: { depth: { value: 635 } },
+    }],
+  });
+}
+
+function projectWith({ furnitures, worktops, plinths = [], linearTypeMap = {}, linearFurnitures = [] }) {
+  return {
+    core: {
+      buildingDocument: {
+        buildings: [{
+          levels: [{
+            furnitures,
+          }],
+        }],
+      },
+    },
+    linkedStacks: [{
+      linkedApps: [{
+        data: {
+          furnitureToLinearTypeMap: {
+            furnitureLinearTypeMap: linearTypeMap,
+          },
+        },
+        linkedDistribs: [{
+          data: {
+            linears: { worktops, plinths },
+          },
+        }],
+      }],
+    }],
+    linearFurnitures,
+  };
+}
+
+function furniture(uuid, dbId, transfo, params, boundingBox) {
+  return {
+    uuid,
+    dbId,
+    transfo,
+    boundingBox,
+    parametersConfig: Object.entries(params).map(([paramID, value]) => ({ paramID, value })),
+  };
+}
+
+function plinthPathFurniture(uuid) {
+  return {
+    uuid,
+    parametersConfig: [{ paramID: "Default", value: { dbId: "MAT-PLINTH" } }],
+    embedResourceInfo: {
+      designTree: {
+        sketches: [{
+          sketch: {
+            plane: { O_z: 80 },
+            edges: [
+              { type: "EdgeLine", gmID: 0, vertices: [{ x: 0, y: 0 }, { x: 500, y: 0 }] },
+              { type: "EdgeLine", gmID: 1, vertices: [{ x: 500, y: 0 }, { x: 500, y: 300 }] },
+            ],
+          },
+        }, {
+          sketch: {
+            plane: { O_z: 0 },
+            edges: [
+              { type: "EdgeLine", vertices: [{ x: 0, y: -80 }, { x: 10, y: -80 }] },
+              { type: "EdgeLine", vertices: [{ x: 10, y: -80 }, { x: 10, y: 0 }] },
+              { type: "EdgeLine", vertices: [{ x: 10, y: 0 }, { x: 0, y: 0 }] },
+              { type: "EdgeLine", vertices: [{ x: 0, y: 0 }, { x: 0, y: -80 }] },
+            ],
+          },
+        }],
+      },
+    },
+  };
+}
+
+function worktopSketchFurniture(uuid) {
+  return {
+    uuid,
+    parametersConfig: [{ paramID: "Default", value: { dbId: "MAT-WORKTOP" } }],
+    embedResourceInfo: {
+      designTree: {
+        sketches: [{
+          sketch: {
+            edges: [
+              { type: "EdgeLine", vertices: [{ x: 4490.959463715553, y: -193.00698718428612 }, { x: 5180.959462597966, y: -193.0069974660873 }] },
+              { type: "EdgeLine", vertices: [{ x: 5180.959462597966, y: -193.0069974660873 }, { x: 5180.959462597966, y: 441.99301118510107 }] },
+              { type: "EdgeLine", vertices: [{ x: 5180.959462597966, y: 441.99301118510107 }, { x: 4545.959471583366, y: 441.99301199615 }] },
+              { type: "EdgeLine", vertices: [{ x: 4545.959471583366, y: 441.99301199615 }, { x: 4490.959473177791, y: 441.9930128157139 }] },
+              { type: "EdgeLine", vertices: [{ x: 4490.959473177791, y: 441.9930128157139 }, { x: 4490.959463715553, y: -193.00698718428612 }] },
+            ],
+          },
+        }, {
+          sketch: {
+            edges: [
+              { type: "EdgeLine", vertices: [{ x: 5180.95947265625, y: 1281.9929809570312 }, { x: 4545.95947265625, y: 1281.9929809570312 }] },
+              { type: "EdgeLine", vertices: [{ x: 4545.95947265625, y: 1281.9929809570312 }, { x: 4545.959471583366, y: 441.99301199615 }] },
+              { type: "EdgeLine", vertices: [{ x: 4545.959471583366, y: 441.99301199615 }, { x: 5180.959462597966, y: 441.99301118510107 }] },
+              { type: "EdgeLine", vertices: [{ x: 5180.959462597966, y: 441.99301118510107 }, { x: 5180.95947265625, y: 1281.9929809570312 }] },
+            ],
+          },
+        }],
+      },
+    },
+  };
+}
+
+function identityMatrix() {
+  return [
+    1, 0, 0, 0,
+    0, 1, 0, 0,
+    0, 0, 1, 0,
+    0, 0, 0, 1,
+  ];
+}
+
+function worldRect(slab) {
+  const xs = slab.points.map((point) => point[0]);
+  const ys = slab.points.map((point) => point[1]);
+  return {
+    x: { min: Math.min(...xs), max: Math.max(...xs) },
+    y: { min: Math.min(...ys), max: Math.max(...ys) },
+  };
+}
+
+function rectOverlap(a, b) {
+  const rectA = worldRect(a);
+  const rectB = worldRect(b);
+  const x = Math.max(0, Math.min(rectA.x.max, rectB.x.max) - Math.max(rectA.x.min, rectB.x.min));
+  const y = Math.max(0, Math.min(rectA.y.max, rectB.y.max) - Math.max(rectA.y.min, rectB.y.min));
+  return { x, y, area: x * y };
+}
+
+function unionRect(slabs) {
+  const rects = slabs.map(worldRect);
+  const minX = Math.min(...rects.map((rect) => rect.x.min));
+  const maxX = Math.max(...rects.map((rect) => rect.x.max));
+  const minY = Math.min(...rects.map((rect) => rect.y.min));
+  const maxY = Math.max(...rects.map((rect) => rect.y.max));
+  return { minX, maxX, minY, maxY, width: maxX - minX, depth: maxY - minY };
+}
+
+function assertNear(actual, expected, message, epsilon = 0.001) {
+  assert.ok(Math.abs(actual - expected) <= epsilon, `${message}: expected ${expected}, got ${actual}`);
 }
 
 module.exports = { runSelfTest };

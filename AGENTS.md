@@ -147,4 +147,4 @@ node --check src/assemble.js
 npm test
 ```
 
-For generated OBJ bundles, also check `.assembly-report.json` summaries, texture map existence in the MTL, isolated `procedural_worktop` and `procedural_plinth` previews, and final OBJ counts (`v`, `vt`, `vn`, `f`) when Live Home 3D performance matters.
+`npm test` includes synthetic assembly regressions for worktop corner bridges, freestanding filler corner alignment, wall-side countertop edge extension, and procedural plinth path export. For generated OBJ bundles, also check `.assembly-report.json` summaries, texture map existence in the MTL, isolated `procedural_worktop` and `procedural_plinth` previews, and final OBJ counts (`v`, `vt`, `vn`, `f`) when Live Home 3D performance matters.
