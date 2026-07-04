@@ -42,8 +42,11 @@ async function assembleInputs(bmprojPath, assetMapPath, options) {
   }
 
   for (const root of roots) {
+    const rootLabel = furnitureLabel(context, root);
+    const rootKey = root.dbId || root.uuid || rootLabel;
     await resolveProduct(context, {
       dbId: root.dbId,
+      embeddedAssembly: root.embedResourceInfo?.assembly || null,
       params: Object.assign(
         {},
         paramsFromResource(root.resourceInfo),
@@ -51,9 +54,9 @@ async function assembleInputs(bmprojPath, assetMapPath, options) {
         paramsFromConfig(root.contextConfig),
       ),
       matrix: rootMatrix(root, options.whole),
-      label: root.dbId,
+      label: rootLabel,
       instance: instanceSummary(context, root),
-      trail: [root.dbId],
+      trail: [rootKey],
       depth: 0,
     });
   }
@@ -66,10 +69,11 @@ async function assembleInputs(bmprojPath, assetMapPath, options) {
   }
 
   const root = roots[0];
-  const rootLabel = options.whole ? "Complete kitchen" : labelForAsset(context.assetById.get(root.dbId));
+  const rootLabel = options.whole ? "Complete kitchen" : furnitureLabel(context, root);
+  const rootKey = root.dbId || root.uuid || "assembly";
   const basename = options.whole
     ? sanitizeFileName(options.name || "Complete kitchen")
-    : sanitizeFileName(`${rootLabel || root.dbId}__${root.dbId}_${root.uuid || "assembly"}`);
+    : sanitizeFileName(`${rootLabel || rootKey}__${rootKey}_${root.uuid || "assembly"}`);
   const objPath = path.join(outDir, `${basename}.obj`);
   const mtlPath = path.join(outDir, `${basename}.mtl`);
   const outputs = await writeCombinedObj(context, objPath, mtlPath);
@@ -111,12 +115,18 @@ async function assembleInputs(bmprojPath, assetMapPath, options) {
 }
 
 async function resolveProduct(context, state) {
-  if (!state.dbId || state.depth > 24) {
-    if (state.dbId) context.skipped.push({ dbId: state.dbId, reason: "max-depth", trail: state.trail });
+  const stateKey = state.dbId || state.embeddedAssembly?.uuid || state.instance?.uuid || state.label;
+  if (!stateKey || state.depth > 24) {
+    if (stateKey) context.skipped.push({ dbId: state.dbId || null, key: stateKey, reason: "max-depth", trail: state.trail });
     return;
   }
-  if (state.trail.slice(0, -1).includes(state.dbId)) {
-    context.skipped.push({ dbId: state.dbId, reason: "cycle", trail: state.trail });
+  if (state.trail.slice(0, -1).includes(stateKey)) {
+    context.skipped.push({ dbId: state.dbId || null, key: stateKey, reason: "cycle", trail: state.trail });
+    return;
+  }
+
+  if (state.embeddedAssembly) {
+    await resolveBmaComponents(context, state, state.embeddedAssembly, null, null);
     return;
   }
 
@@ -160,8 +170,13 @@ async function resolveProduct(context, state) {
   }
 
   const env = Object.assign({}, paramsFromBma(bma), paramsFromResource(resource?.resourceInfo), state.params);
+  await resolveBmaComponents(context, state, bma, asset, resource, env);
+}
+
+async function resolveBmaComponents(context, state, bma, asset, resource, initialEnv) {
+  const env = initialEnv || Object.assign({}, paramsFromBma(bma), paramsFromResource(resource?.resourceInfo), state.params);
   evaluateRelations(context, env, bma.relations || [], bma.components || []);
-  recordOperationCutout(context, state, asset, env);
+  if (asset) recordOperationCutout(context, state, asset, env);
 
   for (const component of bma.components || []) {
     if (!componentIsActive(component, env)) {
@@ -392,7 +407,7 @@ function collectFurniture(project) {
   visit(project, (value, pointer) => {
     if (Array.isArray(value) && pointer[pointer.length - 1] === "furnitures") {
       value.forEach((item, index) => {
-        if (item?.dbId) out.push(Object.assign({ path: pointer.concat(index).join("/") }, item));
+        if (item?.dbId || item?.embedResourceInfo?.assembly) out.push(Object.assign({ path: pointer.concat(index).join("/") }, item));
       });
     }
   });
@@ -1325,26 +1340,34 @@ function rootMatrix(root, whole) {
 }
 
 function instanceSummary(context, root) {
-  const asset = context.assetById.get(root.dbId);
   return {
-    dbId: root.dbId,
+    dbId: root.dbId || null,
     uuid: root.uuid || null,
-    label: labelForAsset(asset) || root.dbId,
+    label: furnitureLabel(context, root),
     path: root.path || null,
   };
 }
 
 function placementSummary(context, root, whole) {
-  const asset = context.assetById.get(root.dbId);
   return {
-    dbId: root.dbId,
+    dbId: root.dbId || null,
     uuid: root.uuid || null,
-    label: labelForAsset(asset) || root.dbId,
+    label: furnitureLabel(context, root),
     path: root.path || null,
     matrix: rootMatrix(root, whole),
     localBoundingBox: root.boundingBox || null,
     worldBoundingBox: root.boundingBox ? transformBoundingBox(root.boundingBox, rootMatrix(root, whole)) : null,
   };
+}
+
+function furnitureLabel(context, root) {
+  const asset = root.dbId ? context.assetById.get(root.dbId) : null;
+  return labelForAsset(asset) ||
+    root.productInfo?.definition?.name ||
+    root.embedResourceInfo?.assembly?.name ||
+    root.dbId ||
+    root.uuid ||
+    "embedded assembly";
 }
 
 function transformBoundingBox(box, matrix) {

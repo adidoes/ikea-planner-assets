@@ -58,7 +58,33 @@ async function runAssemblyGeometryTests(temp) {
   const assetMapPath = path.join(temp, "asset-map.json");
   const objDir = path.join(temp, "obj");
   await fs.mkdir(objDir, { recursive: true });
-  await fs.writeFile(assetMapPath, JSON.stringify({ assets: [] }));
+  await fs.writeFile(path.join(objDir, "embedded-panel.obj"), simplePanelObj());
+  await fs.writeFile(assetMapPath, JSON.stringify({
+    assets: [{
+      assetFile: path.join(temp, "embedded-panel.BM3"),
+      resource: { id: "PANEL-ASSET", extensions: [".bm3"] },
+      label: "Embedded test panel",
+    }],
+  }));
+
+  const embeddedProjectPath = path.join(temp, "embedded-assembly.BMPROJ");
+  await fs.writeFile(embeddedProjectPath, JSON.stringify(embeddedAssemblyProject()));
+  const embedded = await assembleInputs(embeddedProjectPath, assetMapPath, {
+    objDir,
+    out: path.join(temp, "embedded-out"),
+    whole: true,
+    worktops: false,
+    flat: true,
+    axis: "y-up",
+    name: "embedded-assembly",
+    internalParts: "keep",
+  });
+  assert.equal(embedded.root.furnitureCount, 1, "embedded furniture without dbId should be included as a root");
+  assert.equal(embedded.summary.leaves, 1, "embedded furniture assembly should resolve child BM3 leaves");
+  assert.equal(embedded.placements[0].dbId, null);
+  assert.equal(embedded.placements[0].label, "CUSTOM-CABINET");
+  assert.equal(embedded.leaves[0].instance.uuid, "embedded-cabinet");
+  assert.equal(embedded.leaves[0].dbId, "PANEL-ASSET");
 
   const alignedProjectPath = path.join(temp, "aligned-corner.BMPROJ");
   await fs.writeFile(alignedProjectPath, JSON.stringify(cornerAlignmentProject()));
@@ -160,6 +186,45 @@ function cornerAlignmentProject() {
     }],
     linearTypeMap: { "plinth-path": "Plinth", "worktop-linear": "Worktop" },
     linearFurnitures: [plinthPathFurniture("plinth-path"), worktopSketchFurniture("worktop-linear")],
+  });
+}
+
+function embeddedAssemblyProject() {
+  return projectWith({
+    furnitures: [{
+      uuid: "embedded-cabinet",
+      transfo: [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        100, 200, 0, 1,
+      ],
+      boundingBox: {
+        min: { x: -300, y: -300, z: 0 },
+        max: { x: 300, y: 300, z: 2400 },
+      },
+      parametersConfig: [
+        { paramID: "width", value: 600 },
+        { paramID: "child", value: { dbId: "PANEL-ASSET" } },
+      ],
+      embedResourceInfo: {
+        assembly: {
+          uuid: "embedded-root",
+          name: "CUSTOM-CABINET",
+          parameters: [
+            { type: "component", name: "child", value: { protocol: "product", referenceValue: { dbId: "PANEL-ASSET" } } },
+            { type: "number", name: "width", value: 400 },
+          ],
+          relations: [],
+          components: [{
+            name: "PANEL",
+            reference: "child",
+            activated: true,
+            overloads: [{ parameter: "width", value: "width" }],
+          }],
+        },
+      },
+    }],
   });
 }
 
@@ -333,6 +398,20 @@ function unionRect(slabs) {
 
 function assertNear(actual, expected, message, epsilon = 0.001) {
   assert.ok(Math.abs(actual - expected) <= epsilon, `${message}: expected ${expected}, got ${actual}`);
+}
+
+function simplePanelObj() {
+  return [
+    "v 0 0 0",
+    "v 1 0 0",
+    "v 1 1 0",
+    "vt 0 0",
+    "vt 1 0",
+    "vt 1 1",
+    "vn 0 0 1",
+    "f 1/1/1 2/2/1 3/3/1",
+    "",
+  ].join("\n");
 }
 
 module.exports = { runSelfTest };
