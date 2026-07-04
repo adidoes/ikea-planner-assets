@@ -193,11 +193,15 @@ async function writeObjFromBm3(manifest, binary, options) {
         obj.push(`vn ${tvn[0]} ${tvn[1]} ${tvn[2]}`);
       }
 
-      const count = geometry.drawingGroups && geometry.drawingGroups[0] ? geometry.drawingGroups[0].count : unpacked.positions.length;
-      for (let i = 0; i + 2 < count; i += 3) {
-        const a = i;
-        const b = i + 1;
-        const c = i + 2;
+      const group = geometry.drawingGroups && geometry.drawingGroups[0] ? geometry.drawingGroups[0] : {};
+      const indices = geometry.indexBuffer != null
+        ? readIndexBuffer(binary, manifest.buffers[geometry.indexBuffer], group.start || 0, group.count)
+        : sequentialIndices(group.start || 0, group.count || unpacked.positions.length, unpacked.positions.length);
+      for (let i = 0; i + 2 < indices.length; i += 3) {
+        const a = indices[i];
+        const b = indices[i + 1];
+        const c = indices[i + 2];
+        if (![a, b, c].every((index) => Number.isInteger(index) && index >= 0 && index < unpacked.positions.length)) continue;
         obj.push(`f ${vertexBase + a}/${uvBase + a}/${normalBase + a} ${vertexBase + b}/${uvBase + b}/${normalBase + b} ${vertexBase + c}/${uvBase + c}/${normalBase + c}`);
       }
       vertexBase += unpacked.positions.length;
@@ -272,19 +276,42 @@ function readAttribute(binary, base, descriptor, multiplier) {
   const values = [];
   for (let i = 0; i < descriptor.attr.dimension; i++) {
     const offset = base + descriptor.offset + i * componentByteSize(descriptor.attr.format);
-    let value;
-    switch (descriptor.attr.format) {
-      case "FLOAT": value = binary.readFloatLE(offset); break;
-      case "UNSIGNED_SHORT": value = binary.readUInt16LE(offset); break;
-      case "SHORT": value = binary.readInt16LE(offset); break;
-      case "UNSIGNED_BYTE": value = binary.readUInt8(offset); break;
-      case "BYTE": value = binary.readInt8(offset); break;
-      case "UNSIGNED_INT": value = binary.readUInt32LE(offset); break;
-      default: value = 0;
-    }
+    const value = readScalar(binary, offset, descriptor.attr.format);
     values.push(Number((value * multiplier).toPrecision(8)));
   }
   return values;
+}
+
+function readIndexBuffer(binary, bufferDef, start = 0, count = null) {
+  if (!bufferDef) return [];
+  const format = bufferDef.format || "UNSIGNED_SHORT";
+  const size = componentByteSize(format);
+  const available = Math.floor(bufferDef.byteLength / size);
+  const first = Math.max(0, start || 0);
+  const total = Math.max(0, Math.min(count == null ? available - first : count, available - first));
+  const out = [];
+  for (let i = 0; i < total; i++) {
+    out.push(readScalar(binary, bufferDef.byteOffset + (first + i) * size, format));
+  }
+  return out;
+}
+
+function sequentialIndices(start, count, vertexCount) {
+  const first = Math.max(0, start || 0);
+  const total = Math.max(0, Math.min(count == null ? vertexCount - first : count, vertexCount - first));
+  return Array.from({ length: total }, (_, index) => first + index);
+}
+
+function readScalar(binary, offset, format) {
+  switch (format) {
+    case "FLOAT": return binary.readFloatLE(offset);
+    case "UNSIGNED_SHORT": return binary.readUInt16LE(offset);
+    case "SHORT": return binary.readInt16LE(offset);
+    case "UNSIGNED_BYTE": return binary.readUInt8(offset);
+    case "BYTE": return binary.readInt8(offset);
+    case "UNSIGNED_INT": return binary.readUInt32LE(offset);
+    default: return 0;
+  }
 }
 
 function objMaterialName(index) {
@@ -459,7 +486,7 @@ function makeMesh(json, manifest, bmNode, sourceBinaryOffset) {
     if (!layout) continue;
 
     const stride = layout.reduce((sum, attr) => sum + componentByteSize(attr.format) * attr.dimension, 0);
-    const vertexCount = geometry.drawingGroups && geometry.drawingGroups[0] ? geometry.drawingGroups[0].count : Math.floor(bufferDef.byteLength / stride);
+    const vertexCount = Math.floor(bufferDef.byteLength / stride);
     const attributes = {};
     let attrOffset = 0;
     for (const attr of layout) {
@@ -480,6 +507,7 @@ function makeMesh(json, manifest, bmNode, sourceBinaryOffset) {
     }
     primitives.push({
       attributes,
+      indices: addIndexAccessor(json, manifest, geometry, sourceBinaryOffset),
       material: bmNode.material != null ? bmNode.material : 0,
       mode: drawingMode(geometry.drawingGroups && geometry.drawingGroups[0] && geometry.drawingGroups[0].mode),
     });
@@ -487,14 +515,31 @@ function makeMesh(json, manifest, bmNode, sourceBinaryOffset) {
   return { primitives };
 }
 
+function addIndexAccessor(json, manifest, geometry, sourceBinaryOffset) {
+  if (geometry.indexBuffer == null) return undefined;
+  const bufferDef = manifest.buffers && manifest.buffers[geometry.indexBuffer];
+  if (!bufferDef) return undefined;
+  const group = geometry.drawingGroups && geometry.drawingGroups[0] ? geometry.drawingGroups[0] : {};
+  const componentSize = componentByteSize(bufferDef.format);
+  return addAccessor(json, {
+    byteOffset: sourceBinaryOffset + bufferDef.byteOffset + (group.start || 0) * componentSize,
+    byteLength: group.count ? group.count * componentSize : bufferDef.byteLength,
+    byteStride: undefined,
+    count: group.count || Math.floor(bufferDef.byteLength / componentSize),
+    componentType: componentType(bufferDef.format),
+    type: "SCALAR",
+    target: 34963,
+  });
+}
+
 function addAccessor(json, def) {
   json.bufferViews.push({
     buffer: 0,
     byteOffset: def.byteOffset,
     byteLength: def.byteLength,
-    byteStride: def.byteStride,
     target: def.target,
   });
+  if (def.byteStride) json.bufferViews[json.bufferViews.length - 1].byteStride = def.byteStride;
   const accessor = {
     bufferView: json.bufferViews.length - 1,
     byteOffset: 0,
