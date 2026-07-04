@@ -109,9 +109,10 @@ async function runAssemblyGeometryTests(temp) {
   assertNear(unionRect([filler]).depth, 635, "filler worktop should use IKEA's computed board depth");
   assertNear(unionRect([cabinet]).width, 635, "cabinet worktop should use IKEA's computed board width");
   assertNear(unionRect([cabinet]).depth, 840, "cabinet worktop should use IKEA's computed board run length");
-  assert.ok(
-    aligned.proceduralWorktops.every((slab) => slab.altitude >= 882),
-    "worktops should sit on top of the highest associated furniture instead of intersecting cabinet geometry",
+  assert.equal(
+    aligned.proceduralWorktops.every((slab) => slab.altitude === 880),
+    true,
+    "embedded worktop sketches should preserve planner altitude instead of using tall visible sink-front bounding boxes",
   );
   assertNear(worldRect(filler).x.max, worldRect(cabinet).x.max, "joined corner slabs should share the wall-side edge");
   assertNear(worldRect(filler).x.min, 4490.959463715553, "filler board should preserve IKEA sketch min x");
@@ -164,10 +165,19 @@ function cornerAlignmentProject() {
         min: { x: -400, y: -350.5, z: 0 },
         max: { x: 400.001, y: 300, z: 882 },
       }),
+      furniture("visible-front-sink", "ASL-SINK", [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        5500, 0, 0, 1,
+      ], { width: 800, depth: 600 }, {
+        min: { x: -400, y: -350.5, z: 0 },
+        max: { x: 400.001, y: 300, z: 1276 },
+      }),
     ],
     worktops: [{
       uuid: "worktop-align",
-      furnitureIDs: ["filler", "cabinet"],
+      furnitureIDs: ["filler", "cabinet", "visible-front-sink"],
       productInfoDbId: "MAT-WORKTOP",
       startOverhang: 15,
       endOverhang: 0,

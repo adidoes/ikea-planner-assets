@@ -521,8 +521,10 @@ function collectEmbeddedWorktopSlabs(context) {
 }
 
 function embeddedWorktopAltitude(context, worktop, linear) {
+  const explicitAltitude = Number(worktop?.altitude);
+  if (Number.isFinite(explicitAltitude)) return explicitAltitude;
   const linearZ = Number(linear?.transfo?.[14]);
-  const base = Number(worktop?.altitude) || (Number.isFinite(linearZ) ? linearZ : 882);
+  const base = Number.isFinite(linearZ) ? linearZ : 882;
   const furnitureTop = Math.max(
     ...((worktop?.furnitureIDs || [])
       .map((uuid) => context.furnitureByUuid.get(uuid))
