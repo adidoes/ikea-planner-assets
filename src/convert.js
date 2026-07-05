@@ -5,7 +5,7 @@ const path = require("node:path");
 const { unzipSync } = require("fflate");
 const { NodeIO } = require("@gltf-transform/core");
 const { dedup, prune } = require("@gltf-transform/functions");
-const { ensureDir, listFiles, writeJson } = require("./common");
+const { ensureDir, listFiles, sanitizeFileName, writeJson } = require("./common");
 const { signatureOf } = require("./inspect");
 
 async function convertInputs(inputs, options) {
@@ -660,8 +660,102 @@ async function normalizeGltf(file, options) {
 
 async function copyAsExport(file, options, note) {
   const target = path.join(options.out, path.basename(file));
+  if (/\.obj$/i.test(file)) {
+    const outputs = await copyObjBundle(file, target, options.out);
+    return { path: file, ok: true, output: target, outputs, format: "obj", note };
+  }
   await fs.copyFile(file, target);
   return { path: file, ok: true, output: target, format: path.extname(file).slice(1).toLowerCase(), note };
+}
+
+async function copyObjBundle(file, target, outDir) {
+  const sourceDir = path.dirname(file);
+  const textureDir = path.join(outDir, `${path.basename(target, path.extname(target))}_textures`);
+  const outputs = [target];
+  const copiedMtls = new Map();
+  const objText = await fs.readFile(file, "utf8");
+  const rewrittenObj = [];
+
+  for (const line of objText.split(/\r?\n/)) {
+    if (!line.startsWith("mtllib ")) {
+      rewrittenObj.push(line);
+      continue;
+    }
+    const libs = line.slice(7).trim().split(/\s+/).filter(Boolean);
+    const rewrittenLibs = [];
+    for (const lib of libs) {
+      const sourceMtl = path.resolve(sourceDir, lib);
+      if (!(await exists(sourceMtl))) {
+        rewrittenLibs.push(lib);
+        continue;
+      }
+      if (!copiedMtls.has(sourceMtl)) {
+        const targetMtl = path.join(outDir, uniqueOutputName(outDir, path.basename(lib)));
+        const copied = await copyMtlBundle(sourceMtl, targetMtl, textureDir, outDir);
+        copiedMtls.set(sourceMtl, { targetMtl, outputs: copied });
+        outputs.push(...copied);
+      }
+      rewrittenLibs.push(path.basename(copiedMtls.get(sourceMtl).targetMtl));
+    }
+    rewrittenObj.push(`mtllib ${rewrittenLibs.join(" ")}`);
+  }
+
+  await fs.writeFile(target, `${rewrittenObj.join("\n").replace(/\n+$/, "")}\n`);
+  return outputs;
+}
+
+async function copyMtlBundle(sourceMtl, targetMtl, textureDir, outDir) {
+  const sourceDir = path.dirname(sourceMtl);
+  const outputs = [targetMtl];
+  const rewritten = [];
+  const text = await fs.readFile(sourceMtl, "utf8");
+
+  for (const line of text.split(/\r?\n/)) {
+    const map = parseMtlTextureMapLine(line);
+    if (!map) {
+      rewritten.push(line);
+      continue;
+    }
+    const textureSource = path.resolve(sourceDir, map.texture);
+    if (!(await exists(textureSource))) {
+      rewritten.push(line);
+      continue;
+    }
+    await ensureDir(textureDir);
+    const textureTarget = path.join(textureDir, uniqueOutputName(textureDir, sanitizeFileName(path.basename(map.texture))));
+    await fs.copyFile(textureSource, textureTarget);
+    outputs.push(textureTarget);
+    rewritten.push(`${map.prefix}${map.options}${path.relative(outDir, textureTarget).replace(/\\/g, "/")}`);
+  }
+
+  await fs.writeFile(targetMtl, `${rewritten.join("\n").replace(/\n+$/, "")}\n`);
+  return outputs;
+}
+
+function parseMtlTextureMapLine(line) {
+  const match = line.match(/^((?:map_\S+|bump|disp|decal|refl)\s+)(.+)$/);
+  if (!match) return null;
+  const texture = match[2].trim().split(/\s+/).filter(Boolean).pop();
+  if (!texture) return null;
+  return {
+    prefix: match[1],
+    options: match[2].slice(0, match[2].length - texture.length),
+    texture,
+  };
+}
+
+function uniqueOutputName(dir, name) {
+  const parsed = path.parse(name || "asset");
+  let candidate = sanitizeFileName(name || "asset");
+  let suffix = 2;
+  while (require("node:fs").existsSync(path.join(dir, candidate))) {
+    candidate = `${sanitizeFileName(parsed.name)}_${suffix++}${parsed.ext}`;
+  }
+  return candidate;
+}
+
+async function exists(file) {
+  return Boolean(await fs.stat(file).catch(() => null));
 }
 
 module.exports = { convertInputs, materialExportProfile };

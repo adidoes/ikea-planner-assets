@@ -341,8 +341,25 @@ async function writeCombinedObj(context, objPath, mtlPath) {
     const mtllibs = Array.from(source.matchAll(/^mtllib\s+(.+)$/gm)).map((match) => match[1].trim());
     for (const lib of mtllibs) {
       const mtlSource = path.join(sourceDir, lib);
-      const text = await fs.readFile(mtlSource, "utf8").catch(() => "");
-      if (text) mtl.push(rewriteMtl(text, prefix, sourceDir, path.dirname(mtlPath)));
+      const text = await fs.readFile(mtlSource, "utf8").catch(() => null);
+      if (text) {
+        mtl.push(rewriteMtl(text, prefix, path.dirname(mtlSource), path.dirname(mtlPath)));
+      } else {
+        leaf.materialWarning = {
+          reason: "missing-material-library",
+          mtllib: lib,
+          expectedMtl: mtlSource,
+        };
+        context.skipped.push({
+          dbId: leaf.dbId || null,
+          label: leaf.label || null,
+          reason: "missing-material-library",
+          mtllib: lib,
+          expectedMtl: mtlSource,
+          objPath: leaf.objPath,
+          trail: leaf.trail,
+        });
+      }
     }
 
     vertexBase += localCounts.v;
@@ -1578,13 +1595,26 @@ function rebaseFace(line, vertexBase, uvBase, normalBase) {
 function rewriteMtl(text, prefix, sourceDir, outDir) {
   return text.split(/\r?\n/).map((line) => {
     if (line.startsWith("newmtl ")) return `newmtl ${prefix}_${sanitizeObjName(line.slice(7).trim())}`;
-    if (line.startsWith("map_Kd ")) {
-      const texture = line.slice(7).trim();
-      const abs = path.resolve(sourceDir, texture);
-      return `map_Kd ${path.relative(outDir, abs).replace(/\\/g, "/")}`;
-    }
+    const rewrittenMap = rewriteMtlMapReference(line, sourceDir, outDir);
+    if (rewrittenMap) return rewrittenMap;
     return line;
   }).join("\n");
+}
+
+function rewriteMtlMapReference(line, sourceDir, outDir) {
+  const match = line.match(/^((?:map_\S+|bump|disp|decal|refl)\s+)(.+)$/);
+  if (!match) return null;
+  const texture = lastMtlToken(match[2]);
+  if (!texture) return line;
+  const beforeTexture = match[2].slice(0, match[2].length - texture.length);
+  const abs = path.resolve(sourceDir, texture);
+  const rewritten = path.relative(outDir, abs).replace(/\\/g, "/");
+  return `${match[1]}${beforeTexture}${rewritten}`;
+}
+
+function lastMtlToken(value) {
+  const tokens = String(value || "").trim().split(/\s+/).filter(Boolean);
+  return tokens[tokens.length - 1] || "";
 }
 
 function appendLeafProxy(obj, leaf, source, fit, materialName, vertexBase, uvBase, normalBase, context) {
@@ -1675,7 +1705,7 @@ async function worktopMaterial(context, outDir) {
     if (!manifestBytes || !binary) return fallback;
     const manifest = JSON.parse(Buffer.from(manifestBytes).toString("utf8"));
     const material = manifest.materials?.[0] || {};
-    const image = manifest.images?.[manifest.textures?.[material.diffuseMap || 0]?.image || 0];
+    const image = diffuseImageForMaterial(manifest, material);
     if (!image) return Object.assign(fallback, { color: material.color || fallback.color });
     const textureDir = path.join(outDir, "procedural_worktop_textures");
     await ensureDir(textureDir);
@@ -1707,7 +1737,7 @@ async function plinthMaterial(context, outDir) {
     if (!manifestBytes) return fallback;
     const manifest = JSON.parse(Buffer.from(manifestBytes).toString("utf8"));
     const material = manifest.materials?.[0] || {};
-    const image = binary ? manifest.images?.[manifest.textures?.[material.diffuseMap || 0]?.image || 0] : null;
+    const image = binary ? diffuseImageForMaterial(manifest, material) : null;
     if (!image) return Object.assign(fallback, { color: material.color || fallback.color, sourceColor: material.color || null });
     const textureDir = path.join(outDir, "procedural_plinth_textures");
     await ensureDir(textureDir);
@@ -1717,13 +1747,21 @@ async function plinthMaterial(context, outDir) {
     await fs.writeFile(texturePath, Buffer.from(binary).slice(image.byteOffset, image.byteOffset + image.byteLength));
     return {
       name: "procedural_plinth",
-      color: material.color || [1, 1, 1],
+      color: [1, 1, 1],
       texture: path.relative(outDir, texturePath).replace(/\\/g, "/"),
       sourceColor: material.color || null,
+      sourceUvTransform: Array.isArray(material.uv0Transform) ? material.uv0Transform : null,
     };
   } catch {
     return fallback;
   }
+}
+
+function diffuseImageForMaterial(manifest, material) {
+  if (material.diffuseMap == null) return null;
+  const texture = manifest.textures?.[material.diffuseMap];
+  if (!texture || texture.image == null) return null;
+  return manifest.images?.[texture.image] || null;
 }
 
 function appendWorktopSlab(obj, slab, material, vertexBase, uvBase, normalBase, context) {
@@ -1754,6 +1792,7 @@ function appendWorktopSlab(obj, slab, material, vertexBase, uvBase, normalBase, 
   };
   const normal = (vector) => normalize(orientVector(vector, context.axis));
   const uv = (u, v) => worktopUv(u, v, primary, secondary, material, context.scale);
+  const sideUv = (u1, v1, u2, v2) => worktopSideUvs(u1, v1, u2, v2, bottomZ, topZ, context.scale);
   const addQuad = (vertices, uvs, n) => {
     const vStart = vertexBase + counts.v + 1;
     const vtStart = uvBase + counts.vt + 1;
@@ -1787,16 +1826,16 @@ function appendWorktopSlab(obj, slab, material, vertexBase, uvBase, normalBase, 
     }
   }
 
-  addVerticalRect(addQuad, point, uv, normal, primary.min, primary.min, secondary.min, secondary.max, bottomZ, topZ, mul2(axes.u, -1));
-  addVerticalRect(addQuad, point, uv, normal, primary.max, primary.max, secondary.max, secondary.min, bottomZ, topZ, axes.u);
-  addVerticalRect(addQuad, point, uv, normal, primary.max, primary.min, secondary.min, secondary.min, bottomZ, topZ, mul2(axes.v, -1));
-  addVerticalRect(addQuad, point, uv, normal, primary.min, primary.max, secondary.max, secondary.max, bottomZ, topZ, axes.v);
+  addVerticalRect(addQuad, point, sideUv, normal, primary.min, primary.min, secondary.min, secondary.max, bottomZ, topZ, mul2(axes.u, -1));
+  addVerticalRect(addQuad, point, sideUv, normal, primary.max, primary.max, secondary.max, secondary.min, bottomZ, topZ, axes.u);
+  addVerticalRect(addQuad, point, sideUv, normal, primary.max, primary.min, secondary.min, secondary.min, bottomZ, topZ, mul2(axes.v, -1));
+  addVerticalRect(addQuad, point, sideUv, normal, primary.min, primary.max, secondary.max, secondary.max, bottomZ, topZ, axes.v);
 
   for (const rect of cutouts) {
-    addVerticalRect(addQuad, point, uv, normal, rect.minU, rect.minU, rect.maxV, rect.minV, bottomZ, topZ, axes.u);
-    addVerticalRect(addQuad, point, uv, normal, rect.maxU, rect.maxU, rect.minV, rect.maxV, bottomZ, topZ, mul2(axes.u, -1));
-    addVerticalRect(addQuad, point, uv, normal, rect.minU, rect.maxU, rect.minV, rect.minV, bottomZ, topZ, axes.v);
-    addVerticalRect(addQuad, point, uv, normal, rect.maxU, rect.minU, rect.maxV, rect.maxV, bottomZ, topZ, mul2(axes.v, -1));
+    addVerticalRect(addQuad, point, sideUv, normal, rect.minU, rect.minU, rect.maxV, rect.minV, bottomZ, topZ, axes.u);
+    addVerticalRect(addQuad, point, sideUv, normal, rect.maxU, rect.maxU, rect.minV, rect.maxV, bottomZ, topZ, mul2(axes.u, -1));
+    addVerticalRect(addQuad, point, sideUv, normal, rect.minU, rect.maxU, rect.minV, rect.minV, bottomZ, topZ, axes.v);
+    addVerticalRect(addQuad, point, sideUv, normal, rect.maxU, rect.minU, rect.maxV, rect.maxV, bottomZ, topZ, mul2(axes.v, -1));
   }
 
   return counts;
@@ -1830,6 +1869,7 @@ function appendPolygonWorktopSlab(obj, slab, material, vertexBase, uvBase, norma
 
   const point = (u, v, z) => orientPoint([u * context.scale, v * context.scale, z * context.scale], context.axis);
   const uv = (u, v) => worktopUv(u, v, primary, secondary, material, context.scale);
+  const sideUv = (u1, v1, u2, v2) => worktopSideUvs(u1, v1, u2, v2, bottomZ, topZ, context.scale);
   const addQuad = (vertices, uvs) => {
     const vStart = vertexBase + counts.v + 1;
     const vtStart = uvBase + counts.vt + 1;
@@ -1867,26 +1907,27 @@ function appendPolygonWorktopSlab(obj, slab, material, vertexBase, uvBase, norma
   for (let i = 0; i < polygon.length; i++) {
     const a = polygon[i];
     const b = polygon[(i + 1) % polygon.length];
-    const vertices = clockwise
-      ? [point(a[0], a[1], bottomZ), point(b[0], b[1], bottomZ), point(b[0], b[1], topZ), point(a[0], a[1], topZ)]
-      : [point(b[0], b[1], bottomZ), point(a[0], a[1], bottomZ), point(a[0], a[1], topZ), point(b[0], b[1], topZ)];
-    addQuad(vertices, [uv(a[0], a[1]), uv(b[0], b[1]), uv(b[0], b[1]), uv(a[0], a[1])]);
+    if (clockwise) {
+      addPolygonVerticalRect(addQuad, point, sideUv, a[0], b[0], a[1], b[1], bottomZ, topZ);
+    } else {
+      addPolygonVerticalRect(addQuad, point, sideUv, b[0], a[0], b[1], a[1], bottomZ, topZ);
+    }
   }
 
   for (const cutout of cutouts) {
-    addPolygonVerticalRect(addQuad, point, uv, cutout.minU, cutout.minU, cutout.maxV, cutout.minV, bottomZ, topZ);
-    addPolygonVerticalRect(addQuad, point, uv, cutout.maxU, cutout.maxU, cutout.minV, cutout.maxV, bottomZ, topZ);
-    addPolygonVerticalRect(addQuad, point, uv, cutout.minU, cutout.maxU, cutout.minV, cutout.minV, bottomZ, topZ);
-    addPolygonVerticalRect(addQuad, point, uv, cutout.maxU, cutout.minU, cutout.maxV, cutout.maxV, bottomZ, topZ);
+    addPolygonVerticalRect(addQuad, point, sideUv, cutout.minU, cutout.minU, cutout.maxV, cutout.minV, bottomZ, topZ);
+    addPolygonVerticalRect(addQuad, point, sideUv, cutout.maxU, cutout.maxU, cutout.minV, cutout.maxV, bottomZ, topZ);
+    addPolygonVerticalRect(addQuad, point, sideUv, cutout.minU, cutout.maxU, cutout.minV, cutout.minV, bottomZ, topZ);
+    addPolygonVerticalRect(addQuad, point, sideUv, cutout.maxU, cutout.minU, cutout.maxV, cutout.maxV, bottomZ, topZ);
   }
 
   return counts;
 }
 
-function addPolygonVerticalRect(addQuad, point, uv, u1, u2, v1, v2, bottomZ, topZ) {
+function addPolygonVerticalRect(addQuad, point, sideUv, u1, u2, v1, v2, bottomZ, topZ) {
   addQuad(
     [point(u1, v1, bottomZ), point(u1, v1, topZ), point(u2, v2, topZ), point(u2, v2, bottomZ)],
-    [uv(u1, v1), uv(u1, v1), uv(u2, v2), uv(u2, v2)],
+    sideUv(u1, v1, u2, v2),
   );
 }
 
@@ -1956,17 +1997,46 @@ function appendPlinthSegment(obj, segment, material, vertexBase, uvBase, normalB
 }
 
 function worktopUv(u, v, primary, secondary, material, scale) {
-  void material;
-  void scale;
   const width = Math.max(1, primary.max - primary.min);
   const depth = Math.max(1, secondary.max - secondary.min);
-  return [(u - primary.min) / width, (v - secondary.min) / depth];
+  if (!material?.texture) return [(u - primary.min) / width, (v - secondary.min) / depth];
+  if (Array.isArray(material.sourceUvTransform)) return applyUvTransform([u, v], material.sourceUvTransform);
+  const unitScale = Number.isFinite(scale) ? scale : 0.001;
+  return [(u - primary.min) * unitScale, (v - secondary.min) * unitScale];
 }
 
-function addVerticalRect(addQuad, point, uv, normal, u1, u2, v1, v2, bottomZ, topZ, outward) {
+function worktopSideUvs(u1, v1, u2, v2, bottomZ, topZ, scale) {
+  const unitScale = Number.isFinite(scale) ? scale : 0.001;
+  const length = Math.max(0.001, Math.hypot(u2 - u1, v2 - v1) * unitScale);
+  const height = Math.max(0.001, Math.abs(topZ - bottomZ) * unitScale);
+  return [[0, 0], [0, height], [length, height], [length, 0]];
+}
+
+function applyUvTransform(uv, transform) {
+  if (!Array.isArray(transform)) return uv;
+  const nums = transform.map(Number);
+  if (nums.length >= 9 && nums.slice(0, 6).every(Number.isFinite)) {
+    return [
+      nums[0] * uv[0] + nums[3] * uv[1] + nums[6],
+      nums[1] * uv[0] + nums[4] * uv[1] + nums[7],
+    ];
+  }
+  if (nums.length >= 6 && nums.slice(0, 6).every(Number.isFinite)) {
+    return [
+      nums[0] * uv[0] + nums[2] * uv[1] + nums[4],
+      nums[1] * uv[0] + nums[3] * uv[1] + nums[5],
+    ];
+  }
+  if (nums.length >= 4 && nums.slice(0, 4).every(Number.isFinite)) {
+    return [nums[0] * uv[0] + nums[2], nums[1] * uv[1] + nums[3]];
+  }
+  return uv;
+}
+
+function addVerticalRect(addQuad, point, sideUv, normal, u1, u2, v1, v2, bottomZ, topZ, outward) {
   addQuad(
     [point(u1, v1, bottomZ), point(u1, v1, topZ), point(u2, v2, topZ), point(u2, v2, bottomZ)],
-    [uv(u1, v1), uv(u1, v1), uv(u2, v2), uv(u2, v2)],
+    sideUv(u1, v1, u2, v2),
     normal([outward[0], outward[1], 0]),
   );
 }
@@ -2228,11 +2298,11 @@ async function materializeMtlTextures(mtlPath) {
   const rewritten = [];
 
   for (const line of lines) {
-    if (!line.startsWith("map_Kd ")) {
+    if (!isMtlTextureMapLine(line)) {
       rewritten.push(line);
       continue;
     }
-    const textureRef = line.slice(7).trim();
+    const textureRef = lastMtlToken(line.replace(/^(?:map_\S+|bump|disp|decal|refl)\s+/, ""));
     const source = path.resolve(outDir, textureRef);
     if (!(await exists(source))) {
       rewritten.push(line);
@@ -2242,11 +2312,15 @@ async function materializeMtlTextures(mtlPath) {
     const targetName = uniqueTextureName(textureDir, `${index++}_${path.basename(source)}`);
     const target = path.join(textureDir, targetName);
     await fs.copyFile(source, target);
-    rewritten.push(`map_Kd ${path.relative(outDir, target).replace(/\\/g, "/")}`);
+    rewritten.push(line.slice(0, line.length - textureRef.length) + path.relative(outDir, target).replace(/\\/g, "/"));
     changed = true;
   }
 
   if (changed) await fs.writeFile(mtlPath, `${rewritten.join("\n")}\n`);
+}
+
+function isMtlTextureMapLine(line) {
+  return /^(?:map_\S+|bump|disp|decal|refl)\s+/.test(line);
 }
 
 function uniqueTextureName(textureDir, name) {

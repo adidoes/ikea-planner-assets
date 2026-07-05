@@ -6,8 +6,9 @@ const path = require("node:path");
 const zlib = require("node:zlib");
 const { promisify } = require("node:util");
 const assert = require("node:assert/strict");
+const { zipSync } = require("fflate");
 const { assembleInputs } = require("./assemble");
-const { materialExportProfile } = require("./convert");
+const { convertInputs, materialExportProfile } = require("./convert");
 const { extractEntries } = require("./import-requests");
 const { inspectOne } = require("./inspect");
 
@@ -49,9 +50,37 @@ async function runSelfTest() {
   assert.equal(chromeProfile.metallicFactor, 1);
   assert.ok(chromeProfile.baseColor.every((channel) => channel > 0.6), "chrome Phong materials should export with visible diffuse color");
 
+  await runObjFallbackMaterialTest(temp);
   await runAssemblyGeometryTests(temp);
 
   console.log("self-test ok");
+}
+
+async function runObjFallbackMaterialTest(temp) {
+  const sourceDir = path.join(temp, "obj-source");
+  const outDir = path.join(temp, "obj-copy-out");
+  await fs.mkdir(path.join(sourceDir, "materials", "textures"), { recursive: true });
+  await fs.writeFile(path.join(sourceDir, "materials", "textures", "diffuse.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  await fs.writeFile(path.join(sourceDir, "materials", "source.mtl"), [
+    "newmtl source_mat",
+    "Kd 0.2 0.3 0.4",
+    "map_Kd textures/diffuse.png",
+  ].join("\n"));
+  await fs.writeFile(path.join(sourceDir, "source.obj"), [
+    "mtllib materials/source.mtl",
+    "usemtl source_mat",
+    "v 0 0 0",
+    "v 1 0 0",
+    "v 0 1 0",
+    "f 1 2 3",
+  ].join("\n"));
+
+  await convertInputs([path.join(sourceDir, "source.obj")], { out: outDir });
+  const copiedObj = await fs.readFile(path.join(outDir, "source.obj"), "utf8");
+  const copiedMtl = await fs.readFile(path.join(outDir, "source.mtl"), "utf8");
+  assert.match(copiedObj, /^mtllib source\.mtl$/m, "OBJ fallback should rewrite mtllib to the copied MTL");
+  assert.match(copiedMtl, /map_Kd source_textures\/diffuse\.png/, "OBJ fallback should copy and rewrite diffuse texture references");
+  assert.ok(await exists(path.join(outDir, "source_textures", "diffuse.png")), "OBJ fallback should copy referenced texture files");
 }
 
 async function runAssemblyGeometryTests(temp) {
@@ -59,12 +88,44 @@ async function runAssemblyGeometryTests(temp) {
   const objDir = path.join(temp, "obj");
   await fs.mkdir(objDir, { recursive: true });
   await fs.writeFile(path.join(objDir, "embedded-panel.obj"), simplePanelObj());
+  const worktopMaterialPath = path.join(temp, "worktop-material.BM3MAT");
+  const plinthMaterialPath = path.join(temp, "plinth-material.BM3MAT");
+  const noDiffuseMaterialPath = path.join(temp, "no-diffuse-material.BM3MAT");
+  await fs.writeFile(worktopMaterialPath, bm3MatArchive({
+    color: [0.34, 0.28, 0.2],
+    diffuseMap: 0,
+    uv0Transform: [2, 0, 0, 3, 0.1, 0.2],
+  }, Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4])));
+  await fs.writeFile(plinthMaterialPath, bm3MatArchive({
+    color: [0.12, 0.08, 0.04],
+    diffuseMap: 0,
+  }, Buffer.from([0x89, 0x50, 0x4e, 0x47, 5, 6, 7, 8])));
+  await fs.writeFile(noDiffuseMaterialPath, bm3MatArchive({
+    color: [0.25, 0.5, 0.75],
+  }, Buffer.from([0x89, 0x50, 0x4e, 0x47, 9, 10, 11, 12])));
   await fs.writeFile(assetMapPath, JSON.stringify({
-    assets: [{
-      assetFile: path.join(temp, "embedded-panel.BM3"),
-      resource: { id: "PANEL-ASSET", extensions: [".bm3"] },
-      label: "Embedded test panel",
-    }],
+    assets: [
+      {
+        assetFile: path.join(temp, "embedded-panel.BM3"),
+        resource: { id: "PANEL-ASSET", extensions: [".bm3"] },
+        label: "Embedded test panel",
+      },
+      {
+        assetFile: worktopMaterialPath,
+        resource: { id: "MAT-WORKTOP", extensions: [".bm3mat"] },
+        label: "Synthetic worktop material",
+      },
+      {
+        assetFile: plinthMaterialPath,
+        resource: { id: "MAT-PLINTH", extensions: [".bm3mat"] },
+        label: "Synthetic plinth material",
+      },
+      {
+        assetFile: noDiffuseMaterialPath,
+        resource: { id: "MAT-NO-DIFFUSE", extensions: [".bm3mat"] },
+        label: "Synthetic color-only material",
+      },
+    ],
   }));
 
   const embeddedProjectPath = path.join(temp, "embedded-assembly.BMPROJ");
@@ -85,6 +146,8 @@ async function runAssemblyGeometryTests(temp) {
   assert.equal(embedded.placements[0].label, "CUSTOM-CABINET");
   assert.equal(embedded.leaves[0].instance.uuid, "embedded-cabinet");
   assert.equal(embedded.leaves[0].dbId, "PANEL-ASSET");
+  assert.equal(embedded.leaves[0].materialWarning?.reason, "missing-material-library");
+  assert.equal(embedded.skipped.some((entry) => entry.reason === "missing-material-library"), true, "missing child MTLs should be reported");
 
   const alignedProjectPath = path.join(temp, "aligned-corner.BMPROJ");
   await fs.writeFile(alignedProjectPath, JSON.stringify(cornerAlignmentProject()));
@@ -125,6 +188,35 @@ async function runAssemblyGeometryTests(temp) {
   assertNear(aligned.proceduralPlinths[0].height, 80, "plinth height");
   assertNear(aligned.proceduralPlinths[0].thickness, 10, "plinth thickness");
   assertNear(aligned.proceduralPlinths[0].length, 500, "first plinth path segment length");
+  const alignedMtl = await fs.readFile(aligned.outputs.mtl, "utf8");
+  assert.match(alignedMtl, /newmtl procedural_worktop\nKa 1 1 1\nKd 1 1 1[\s\S]*map_Kd .*MAT-WORKTOP\.png/, "textured worktops should export with neutral Kd and a diffuse map");
+  assert.match(alignedMtl, /newmtl procedural_plinth\nKa 1 1 1\nKd 1 1 1[\s\S]*map_Kd .*MAT-PLINTH\.png/, "textured plinths should export with neutral Kd and a diffuse map");
+  const alignedObj = await fs.readFile(aligned.outputs.obj, "utf8");
+  const uvs = alignedObj
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("vt "))
+    .map((line) => line.split(/\s+/).slice(1, 3).map(Number));
+  assert.ok(uvs.some(([u, v]) => u > 5 && v > 1), "textured worktop UVs should use physical scale instead of one repeat per slab");
+  assert.ok(uvs.some(([u, v]) => u === 0 && Math.abs(v - 0.02) < 0.000001), "worktop side UVs should include slab thickness instead of collapsing to a zero-height texture line");
+  const sideDots = worktopSideNormalDots(alignedObj);
+  assert.ok(sideDots.length > 0, "expected procedural worktop side faces");
+  assert.ok(sideDots.every((dot) => dot > 0), "procedural worktop side normals should face outward for single-sided importers");
+
+  const noDiffuseProjectPath = path.join(temp, "no-diffuse-worktop.BMPROJ");
+  await fs.writeFile(noDiffuseProjectPath, JSON.stringify(noDiffuseWorktopProject()));
+  const noDiffuse = await assembleInputs(noDiffuseProjectPath, assetMapPath, {
+    objDir,
+    out: path.join(temp, "no-diffuse-out"),
+    whole: true,
+    worktops: true,
+    flat: true,
+    axis: "y-up",
+    name: "no-diffuse-worktop",
+    internalParts: "omit",
+  });
+  const noDiffuseMtl = await fs.readFile(noDiffuse.outputs.mtl, "utf8");
+  assert.match(noDiffuseMtl, /newmtl procedural_worktop\nKa 0\.25 0\.5 0\.75\nKd 0\.25 0\.5 0\.75/, "color-only BM3MAT should preserve its color");
+  assert.doesNotMatch(noDiffuseMtl, /map_Kd/, "color-only BM3MAT should not fall back to image zero as a diffuse map");
 
   const bridgeProjectPath = path.join(temp, "corner-bridge.BMPROJ");
   await fs.writeFile(bridgeProjectPath, JSON.stringify(cornerBridgeProject()));
@@ -271,6 +363,25 @@ function cornerBridgeProject() {
   });
 }
 
+function noDiffuseWorktopProject() {
+  return projectWith({
+    furnitures: [
+      furniture("plain-cabinet", "ASL-PLAIN", identityMatrix(), { width: 600, depth: 600 }, {
+        min: { x: -300, y: -300, z: 0 },
+        max: { x: 300, y: 300, z: 880 },
+      }),
+    ],
+    worktops: [{
+      uuid: "worktop-no-diffuse",
+      furnitureIDs: ["plain-cabinet"],
+      productInfoDbId: "MAT-NO-DIFFUSE",
+      thickness: 20,
+      altitude: 880,
+      parameters: { depth: { value: 635 } },
+    }],
+  });
+}
+
 function projectWith({ furnitures, worktops, plinths = [], linearTypeMap = {}, linearFurnitures = [] }) {
   return {
     core: {
@@ -410,8 +521,21 @@ function assertNear(actual, expected, message, epsilon = 0.001) {
   assert.ok(Math.abs(actual - expected) <= epsilon, `${message}: expected ${expected}, got ${actual}`);
 }
 
+function bm3MatArchive(material, imageBytes) {
+  const manifest = {
+    materials: [material],
+    textures: [{ image: 0 }],
+    images: [{ format: "png", byteOffset: 0, byteLength: imageBytes.length }],
+  };
+  return Buffer.from(zipSync({
+    "manifest.json": Buffer.from(JSON.stringify(manifest)),
+    "binary.bin": imageBytes,
+  }));
+}
+
 function simplePanelObj() {
   return [
+    "mtllib missing-panel.mtl",
     "v 0 0 0",
     "v 1 0 0",
     "v 1 1 0",
@@ -419,9 +543,62 @@ function simplePanelObj() {
     "vt 1 0",
     "vt 1 1",
     "vn 0 0 1",
+    "usemtl missing_panel",
     "f 1/1/1 2/2/1 3/3/1",
     "",
   ].join("\n");
+}
+
+async function exists(file) {
+  return Boolean(await fs.stat(file).catch(() => null));
+}
+
+function worktopSideNormalDots(objText) {
+  const vertices = [];
+  const normals = [];
+  const blocks = [];
+  let currentBlock = null;
+  let inWorktop = false;
+  for (const line of objText.split(/\r?\n/)) {
+    if (line.startsWith("# Procedural worktop")) {
+      currentBlock = [];
+      blocks.push(currentBlock);
+    }
+    if (line.startsWith("v ")) {
+      vertices.push(line.split(/\s+/).slice(1, 4).map(Number));
+    } else if (line.startsWith("vn ")) {
+      normals.push(line.split(/\s+/).slice(1, 4).map(Number));
+    } else if (line.startsWith("usemtl ")) {
+      inWorktop = line.trim() === "usemtl procedural_worktop";
+    } else if (inWorktop && line.startsWith("f ")) {
+      const refs = line.slice(2).trim().split(/\s+/).map((part) => {
+        const [v, , vn] = part.split("/");
+        return { vertex: vertices[Number(v) - 1], normal: normals[Number(vn) - 1] };
+      });
+      const normal = refs[0]?.normal;
+      if (!normal || Math.abs(normal[1]) > 0.5) continue;
+      currentBlock.push({
+        normal,
+        centroid: refs.reduce((sum, ref) => [
+          sum[0] + ref.vertex[0] / refs.length,
+          sum[1] + ref.vertex[1] / refs.length,
+          sum[2] + ref.vertex[2] / refs.length,
+        ], [0, 0, 0]),
+      });
+    }
+  }
+  return blocks.flatMap((sideFaces) => {
+    if (!sideFaces.length) return [];
+    const center = sideFaces.reduce((sum, face) => [
+      sum[0] + face.centroid[0] / sideFaces.length,
+      0,
+      sum[2] + face.centroid[2] / sideFaces.length,
+    ], [0, 0, 0]);
+    return sideFaces.map((face) => (
+      (face.centroid[0] - center[0]) * face.normal[0] +
+      (face.centroid[2] - center[2]) * face.normal[2]
+    ));
+  });
 }
 
 module.exports = { runSelfTest };
