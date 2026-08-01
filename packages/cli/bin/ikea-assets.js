@@ -2,15 +2,19 @@
 "use strict";
 
 const { Command } = require("commander");
-const { captureBrowser } = require("../src/capture-browser");
-const { importRequests } = require("../src/import-requests");
-const { downloadManifest } = require("../src/download");
-const { inspectInputs } = require("../src/inspect");
-const { assembleInputs } = require("../src/assemble");
-const { convertInputs } = require("../src/convert");
-const { indexBundles } = require("../src/index-bundles");
-const { mapAssets } = require("../src/map-assets");
-const { nameExports } = require("../src/name-exports");
+const {
+  assembleInputs,
+  captureBrowser,
+  convertInputs,
+  downloadManifest,
+  exportMethodPlan,
+  importRequests,
+  indexBundles,
+  inspectInputs,
+  mapAssets,
+  nameExports,
+} = require("@ikea-planner-assets/method");
+const { exportPaxPlan, exportPlatsaPlan } = require("@ikea-planner-assets/storage-one");
 const { previewObj } = require("../src/preview");
 const { runSelfTest } = require("../src/self-test");
 
@@ -127,9 +131,55 @@ program
   .action(async (bmproj, manifest, options) => mapAssets(bmproj, manifest, options));
 
 program
+  .command("method-export")
+  .description("Capture a shared METHOD kitchen plan and export one OBJ/MTL bundle.")
+  .argument("<planner-url>", "METHOD kitchen planner URL")
+  .option("-o, --out <dir>", "Output directory", "assets/method")
+  .option("--name <name>", "Output basename", "ikea-method-kitchen")
+  .option("--wait-ms <ms>", "Extra capture wait after network idle", parseInteger, 25000)
+  .option("--axis <axis>", "Output axis: y-up or z-up", "y-up")
+  .option("--scale <n>", "Unit scale from planner millimetres", Number.parseFloat, 0.001)
+  .option("--proxy-over-faces <n>", "Proxy child parts above this face count", parseInteger)
+  .option("--internal-parts <mode>", "Hidden/internal parts: keep, proxy, or omit", "keep")
+  .option("--headed", "Show the browser")
+  .action(async (url, options) => exportMethodPlan(url, options));
+
+addStorageOneExportCommand({
+  command: "platsa-export",
+  label: "PLATSA",
+  out: "assets/platsa",
+  exporter: exportPlatsaPlan,
+});
+
+addStorageOneExportCommand({
+  command: "pax-export",
+  label: "PAX",
+  out: "assets/pax",
+  exporter: exportPaxPlan,
+});
+
+program
   .command("self-test")
   .description("Run local smoke tests for manifest import, decoding, and conversion fallbacks.")
   .action(async () => runSelfTest());
+
+function addStorageOneExportCommand({ command, label, out, exporter }) {
+  program
+    .command(command)
+    .description(`Download a public ${label} design and export one OBJ/MTL bundle.`)
+    .argument("<urlOrId>", `${label} share URL or plan id`)
+    .option("-o, --out <dir>", "Output directory", out)
+    .option("--retail-unit <code>", "Retail unit for a bare plan id", "BE")
+    .option("--language <code>", "Language for a bare plan id", "en")
+    .option("--name <name>", "Output basename")
+    .option("--axis <axis>", "Output axis: y-up or z-up", "y-up")
+    .option("--model-variant <variant>", "Model variant: compatible or optimized", "compatible")
+    .option("--concurrency <n>", "Parallel model downloads", parseInteger, 6)
+    .option("--timeout-ms <ms>", "Planner timeout", parseInteger, 90000)
+    .option("--settle-ms <ms>", "Post-load settling time", parseInteger, 1200)
+    .option("--headed", "Show the browser")
+    .action(async (input, options) => exporter(input, options));
+}
 
 function parseInteger(value) {
   const parsed = Number.parseInt(value, 10);

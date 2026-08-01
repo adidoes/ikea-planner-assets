@@ -26,57 +26,57 @@ npm test
 Capture a loaded planner session:
 
 ```bash
-node bin/ikea-assets.js capture-browser "<planner-url>" --out capture/playwright --save-bodies
+node packages/cli/bin/ikea-assets.js capture-browser "<planner-url>" --out capture/playwright --save-bodies
 ```
 
 Build the asset/name map:
 
 ```bash
-node bin/ikea-assets.js map-assets capture/playwright/bodies/<project>.BMPROJ capture/playwright/manifest.json --metadata capture/playwright/bodies/<metadata> -o capture/playwright/asset-map.json --tsv capture/playwright/asset-map.tsv
+node packages/cli/bin/ikea-assets.js map-assets capture/playwright/bodies/<project>.BMPROJ capture/playwright/manifest.json --metadata capture/playwright/bodies/<metadata> -o capture/playwright/asset-map.json --tsv capture/playwright/asset-map.tsv
 ```
 
 Convert captured `.BM3` files:
 
 ```bash
-node bin/ikea-assets.js convert capture/playwright/bodies -o assets/exported/live-home-3d --format obj --scale 0.001
+node packages/cli/bin/ikea-assets.js convert capture/playwright/bodies -o assets/exported/live-home-3d --format obj --scale 0.001
 ```
 
 Create suggestive filenames:
 
 ```bash
-node bin/ikea-assets.js name-exports capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/named-obj
+node packages/cli/bin/ikea-assets.js name-exports capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/named-obj
 ```
 
 Assemble one placed furniture item:
 
 ```bash
-node bin/ikea-assets.js assemble capture/playwright/bodies/<project>.BMPROJ capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/assemblies --instance <furniture-uuid-or-dbId>
+node packages/cli/bin/ikea-assets.js assemble capture/playwright/bodies/<project>.BMPROJ capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/assemblies --instance <furniture-uuid-or-dbId>
 ```
 
 Assemble the whole kitchen for Live Home 3D:
 
 ```bash
-node bin/ikea-assets.js assemble capture/playwright/bodies/<project>.BMPROJ capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/whole-kitchen --whole --worktops --flat --axis y-up --name ikea-kitchen-livehome-flat-yup
+node packages/cli/bin/ikea-assets.js assemble capture/playwright/bodies/<project>.BMPROJ capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/whole-kitchen --whole --worktops --flat --axis y-up --name ikea-kitchen-livehome-flat-yup
 ```
 
 If Live Home 3D warns that the OBJ is too complex, add a proxy threshold:
 
 ```bash
-node bin/ikea-assets.js assemble capture/playwright/bodies/<project>.BMPROJ capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/whole-kitchen --whole --worktops --flat --axis y-up --proxy-over-faces 500 --name ikea-kitchen-livehome-flat-yup-lite
+node packages/cli/bin/ikea-assets.js assemble capture/playwright/bodies/<project>.BMPROJ capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/whole-kitchen --whole --worktops --flat --axis y-up --proxy-over-faces 500 --name ikea-kitchen-livehome-flat-yup-lite
 ```
 
 If the user does not need hidden contents inside closed cabinets, omit those internals before proxying the remaining heavy parts:
 
 ```bash
-node bin/ikea-assets.js assemble capture/playwright/bodies/<project>.BMPROJ capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/whole-kitchen --whole --worktops --flat --axis y-up --internal-parts omit --proxy-over-faces 500 --name ikea-kitchen-livehome-flat-yup-no-internals-lite
+node packages/cli/bin/ikea-assets.js assemble capture/playwright/bodies/<project>.BMPROJ capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/whole-kitchen --whole --worktops --flat --axis y-up --internal-parts omit --proxy-over-faces 500 --name ikea-kitchen-livehome-flat-yup-no-internals-lite
 ```
 
 Render review screenshots before asking the user to test in Live Home:
 
 ```bash
-node bin/ikea-assets.js preview assets/whole-kitchen/<candidate>.obj --mtl assets/whole-kitchen/<candidate>.mtl -o assets/previews/<candidate>
-node bin/ikea-assets.js preview assets/whole-kitchen/<candidate>.obj --mtl assets/whole-kitchen/<candidate>.mtl -o assets/previews/<candidate>-worktops --only-material procedural_worktop
-node bin/ikea-assets.js preview assets/whole-kitchen/<candidate>.obj --mtl assets/whole-kitchen/<candidate>.mtl -o assets/previews/<candidate>-plinths --only-material procedural_plinth
+node packages/cli/bin/ikea-assets.js preview assets/whole-kitchen/<candidate>.obj --mtl assets/whole-kitchen/<candidate>.mtl -o assets/previews/<candidate>
+node packages/cli/bin/ikea-assets.js preview assets/whole-kitchen/<candidate>.obj --mtl assets/whole-kitchen/<candidate>.mtl -o assets/previews/<candidate>-worktops --only-material procedural_worktop
+node packages/cli/bin/ikea-assets.js preview assets/whole-kitchen/<candidate>.obj --mtl assets/whole-kitchen/<candidate>.mtl -o assets/previews/<candidate>-plinths --only-material procedural_plinth
 ```
 
 ## Important Outputs
@@ -130,12 +130,16 @@ If the normal whole-kitchen OBJ is too heavy, regenerate with `--proxy-over-face
 
 ## Implementation Map
 
-- `bin/ikea-assets.js`: CLI command definitions.
-- `src/capture-browser.js`: Playwright capture.
-- `src/map-assets.js`: asset/catalog/project correlation.
-- `src/convert.js`: BM3/BM3MAT conversion and export.
-- `src/name-exports.js`: suggestive OBJ bundle naming.
-- `src/assemble.js`: assembly resolver, scaling-area fitting, worktop generation, cutouts, and proxy export.
+- `packages/cli/bin/ikea-assets.js`: CLI command definitions.
+- `packages/cli/src/preview.js`: OBJ/MTL preview renderer.
+- `packages/method/src/capture-browser.js`: METHOD/HomeByMe Playwright capture.
+- `packages/method/src/map-assets.js`: METHOD asset/catalog/project correlation.
+- `packages/method/src/convert.js`: BM3/BM3MAT conversion and export.
+- `packages/method/src/name-exports.js`: suggestive METHOD OBJ bundle naming.
+- `packages/method/src/assemble.js`: METHOD assembly resolver, scaling-area fitting, worktops, cutouts, and proxies.
+- `packages/storage-one/src/`: shared PAX/PLATSA capture, catalog, GLB, placement, material, and OBJ pipeline.
+- `packages/storage-one/src/profile.js`: explicit PAX and PLATSA planner profiles.
+- `apps/web/`: Bun + Next.js dashboard.
 - `docs/FORMAT_NOTES.md`: reverse-engineering notes.
 
 ## Verification
@@ -143,7 +147,7 @@ If the normal whole-kitchen OBJ is too heavy, regenerate with `--proxy-over-face
 Use:
 
 ```bash
-node --check src/assemble.js
+node --check packages/method/src/assemble.js
 npm test
 ```
 

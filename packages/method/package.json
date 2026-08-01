@@ -1,0 +1,17 @@
+{
+  "name": "@ikea-planner-assets/method",
+  "version": "0.1.0",
+  "private": true,
+  "description": "METHOD/HomeByMe capture, conversion, and OBJ assembly pipeline.",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.4.0",
+    "@gltf-transform/functions": "^4.4.0",
+    "fflate": "^0.8.3",
+    "playwright": "1.60.0"
+  }
+}

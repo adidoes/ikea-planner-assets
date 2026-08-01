@@ -1,0 +1,65 @@
+{
+  "configurationId": "337LMDY",
+  "configuration": {
+    "content": {
+      "entities": [
+        {
+          "id": "38",
+          "ref": "10458220",
+          "parent": "18",
+          "c": {
+            "WorldTransformComponent": {
+              "p": { "x": 0, "y": 1182, "z": 290 },
+              "r": { "w": 1, "x": 0, "y": 0, "z": 0 }
+            }
+          }
+        },
+        {
+          "id": "198",
+          "ref": "80580665",
+          "parent": "197",
+          "c": {
+            "WorldTransformComponent": {
+              "p": { "x": -0.5, "y": 1213, "z": 594 },
+              "r": { "w": 0, "x": 0, "y": 0, "z": -1 }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "icf": {
+    "content": {
+      "articles": [
+        {
+          "id": 1,
+          "product_id": "ART-10458220",
+          "name": "10458220 500x2360x580",
+          "category": "pax-hinge-frame",
+          "parent_ids": [],
+          "child_ids": [3],
+          "dimensions": { "x": 498, "y": 2364, "z": 580 },
+          "transform": {
+            "position": { "x": 0, "y": 1182, "z": 290 },
+            "rotation": { "x": 0, "y": 0, "z": 0 },
+            "scale": { "x": 1, "y": 1, "z": 1 }
+          }
+        },
+        {
+          "id": 3,
+          "product_id": "ART-80580665",
+          "name": "80580665 500x2360x0",
+          "category": "pax-hinge-door-softclosing",
+          "parent_ids": [1],
+          "child_ids": [],
+          "dimensions": { "x": 495, "y": 2294, "z": 16 },
+          "transform": {
+            "position": { "x": -0.5, "y": 1213, "z": 595.5 },
+            "rotation": { "x": 0, "y": 0, "z": 180 },
+            "scale": { "x": 1, "y": 1, "z": 1 }
+          }
+        }
+      ]
+    }
+  }
+}

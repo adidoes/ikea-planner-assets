@@ -8,9 +8,11 @@ const { promisify } = require("node:util");
 const assert = require("node:assert/strict");
 const { zipSync } = require("fflate");
 const { assembleInputs } = require("./assemble");
+const { redactHeaders } = require("./capture-browser");
 const { convertInputs, materialExportProfile } = require("./convert");
 const { extractEntries } = require("./import-requests");
 const { inspectOne } = require("./inspect");
+const { discoverMethodCapture, exportMethodPlan } = require("./method-export");
 
 const brotliCompress = promisify(zlib.brotliCompress);
 
@@ -34,6 +36,20 @@ async function runSelfTest() {
   assert.equal(entries.length, 1);
   assert.equal(entries[0].url.includes("catalog.default_agg.br"), true);
 
+  assert.deepEqual(redactHeaders({
+    authorization: "Bearer secret",
+    "dexf-api-key": "public-client-key",
+    "x-api-key": "analytics-key",
+    "ocp-apim-subscription-key": "subscription-key",
+    accept: "application/json",
+  }), {
+    authorization: "[redacted]",
+    "dexf-api-key": "[redacted]",
+    "x-api-key": "[redacted]",
+    "ocp-apim-subscription-key": "[redacted]",
+    accept: "application/json",
+  });
+
   const brPath = path.join(temp, "sample.br");
   await fs.writeFile(brPath, await brotliCompress(Buffer.from(JSON.stringify({ hello: "planner" }))));
   const result = await inspectOne(brPath, { out: temp, writeDecoded: true });
@@ -52,8 +68,80 @@ async function runSelfTest() {
 
   await runObjFallbackMaterialTest(temp);
   await runAssemblyGeometryTests(temp);
+  await runMethodExportTest(temp);
+  console.log("method self-test ok");
+}
 
-  console.log("self-test ok");
+async function runMethodExportTest(temp) {
+  const workDir = path.join(temp, "method-export-work");
+  const outDir = path.join(temp, "method-export-out");
+  const calls = [];
+  const files = {
+    project: path.join(workDir, "capture", "bodies", "project.BMPROJ"),
+    model: path.join(workDir, "capture", "bodies", "model.BM3"),
+    material: path.join(workDir, "capture", "bodies", "finish.BM3MAT"),
+    products: path.join(workDir, "capture", "bodies", "products"),
+    metadata: path.join(workDir, "capture", "bodies", "metadata"),
+  };
+  const manifest = {
+    assets: [
+      { url: "https://cdn.example/project.BMPROJ?download=1", bodyPath: files.project, status: 200 },
+      { url: "https://cdn.example/model.BM3", bodyPath: files.model, status: 200 },
+      { url: "https://cdn.example/finish.BM3MAT", bodyPath: files.material, status: 200 },
+      { url: "https://platform.example/3/products?ids[]=frame", bodyPath: files.products, status: 200 },
+      { url: "https://platform.example/api/3/projects/example/metadata/2", bodyPath: files.metadata, status: 200 },
+    ],
+  };
+  const discovered = discoverMethodCapture(manifest);
+  assert.equal(discovered.bmproj, files.project);
+  assert.deepEqual(discovered.convertibleAssets, [files.model, files.material]);
+  assert.deepEqual(discovered.products, [files.products]);
+  assert.equal(discovered.metadata, files.metadata);
+  assert.throws(
+    () => discoverMethodCapture({ assets: [{ url: "https://cdn.example/model.BM3", bodyPath: files.model, status: 200 }] }),
+    /did not expose a \.BMPROJ file/,
+  );
+
+  const result = await exportMethodPlan("https://kitchen.planner.ikea.com/be/en/planner/example/", {
+    out: outDir,
+    workDir,
+    name: "Test METHOD kitchen",
+    waitMs: 0,
+  }, {
+    async captureBrowser(_url, options) {
+      calls.push(["capture", options]);
+      await fs.mkdir(path.dirname(files.project), { recursive: true });
+      await fs.writeFile(path.join(options.out, "manifest.json"), JSON.stringify(manifest));
+    },
+    async mapAssets(bmproj, manifestPath, options) {
+      calls.push(["map", bmproj, manifestPath, options]);
+      await fs.writeFile(options.out, JSON.stringify({ assets: [] }));
+    },
+    async convertInputs(inputs, options) {
+      calls.push(["convert", inputs, options]);
+    },
+    async assembleInputs(bmproj, assetMap, options) {
+      calls.push(["assemble", bmproj, assetMap, options]);
+      await fs.mkdir(options.out, { recursive: true });
+      await Promise.all([
+        fs.writeFile(path.join(options.out, `${options.name}.obj`), "v 0 0 0\n"),
+        fs.writeFile(path.join(options.out, `${options.name}.mtl`), "newmtl test\n"),
+        fs.writeFile(path.join(options.out, `${options.name}.assembly-report.json`), "{}\n"),
+      ]);
+      return { summary: { leaves: 1 } };
+    },
+  });
+
+  assert.equal(calls.map(([name]) => name).join(","), "capture,map,convert,assemble");
+  assert.equal(calls[0][1].saveBodies, true);
+  assert.deepEqual(calls[2][1], [files.model, files.material]);
+  assert.equal(calls[3][3].whole, true);
+  assert.equal(calls[3][3].worktops, true);
+  assert.equal(calls[3][3].plinths, true);
+  assert.equal(calls[3][3].flat, true);
+  assert.equal(calls[3][3].axis, "y-up");
+  assert.equal(result.name, "Test_METHOD_kitchen");
+  assert.equal(await exists(result.objPath), true);
 }
 
 async function runObjFallbackMaterialTest(temp) {

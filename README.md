@@ -1,8 +1,78 @@
 # IKEA Planner Assets
 
-Human quick start: ask an agent to run this repo against your IKEA kitchen planner URL or captured `.BMPROJ` plus manifest/metadata, then use `capture/<run>/asset-map.tsv` for object-name mapping and the OBJ/MTL bundles in your chosen output folder, usually `assets/named-obj/` or `assets/whole-kitchen/`, importing whole kitchens into Live Home 3D as meters with Y-up.
+Human quick start: provide a public PLATSA or PAX share URL, or an IKEA METHOD planner URL/captured `.BMPROJ`. All three planner types can be exported directly to one OBJ bundle.
 
-Local tooling for assets already accessible from an IKEA/HomeByMe kitchen planner session.
+Local tooling for assets accessible from IKEA Storage One and METHOD/HomeByMe planner sessions.
+
+## Monorepo layout
+
+- `apps/web`: Bun + Next.js dashboard.
+- `packages/cli`: shared `ikea-assets` command-line entry point and OBJ preview renderer.
+- `packages/method`: METHOD/HomeByMe capture, BM3 conversion, and kitchen assembly pipeline.
+- `packages/storage-one`: shared Storage One downloader with explicit PLATSA and PAX profiles.
+
+Install every workspace from the repository root:
+
+```bash
+bun install
+```
+
+Run all CLI and dashboard tests with `bun run test:all`. Build the production dashboard with `bun run web:build`.
+
+## PLATSA export
+
+PLATSA uses a DEXF scene graph and direct Draco-compressed GLB product models rather than the kitchen planner's `.BMPROJ`/`.BM3` formats. Export a public design as a single Y-up, metre-based OBJ bundle with:
+
+```bash
+node packages/cli/bin/ikea-assets.js platsa-export "https://www.ikea.com/addon-app/storageone/platsa/web/latest/be/en/?vpcSource=clipboard#/vpc/337F9K6" --out assets/platsa --name my-platsa
+```
+
+The output directory contains the OBJ, MTL, extracted textures, and an export report describing each placed article, source model, transform, and any skipped geometry. PLATSA product models are already authored in metres; only the planner's millimetre translations are converted during placement.
+
+## PAX export
+
+PAX uses the same Storage One DEXF scene architecture as PLATSA, with its own product catalog and GLB models. Export a public design with the analogous command:
+
+```bash
+node packages/cli/bin/ikea-assets.js pax-export "https://www.ikea.com/addon-app/storageone/pax/web/latest/be/en/?vpcSource=clipboard#/vpc/337LMDY" --out assets/pax --name my-pax
+```
+
+This writes one Y-up, metre-based OBJ/MTL bundle, extracted textures, captured source JSON, and a `.pax-report.json` containing instance, model, transform, bounds, and warning diagnostics. A bare plan id is also accepted; use `--retail-unit` and `--language` when the defaults (`BE`, `en`) do not match the design.
+
+## Web app
+
+The local Bun + Next.js dashboard wraps `platsa-export`, `pax-export`, and `method-export`. It lists persisted plans in a sidebar, tracks each job, renders a preview when possible, and produces a downloadable ZIP containing the full OBJ bundle.
+
+```bash
+bun install
+cp apps/web/.env.example apps/web/.env.local
+bun run web:dev
+```
+
+Open `http://localhost:3000`, select PLATSA, PAX, or METHOD, and paste the matching public planner URL. See [`apps/web/README.md`](apps/web/README.md) for job retention, concurrency, and path configuration.
+
+Completed jobs are stored below `IKEA_PLANNER_EXPORT_WORK_DIR`, with one directory per job containing working files, preview images, and the downloadable OBJ ZIP. The local app configuration currently points this at the ignored `assets/obj/` directory, so generated models are never committed.
+
+## Package interfaces
+
+The CLI uses the same package interfaces available to other workspace code:
+
+```js
+const { exportMethodPlan } = require("@ikea-planner-assets/method");
+const { exportPaxPlan, exportPlatsaPlan } = require("@ikea-planner-assets/storage-one");
+```
+
+METHOD remains an independent HomeByMe implementation. PAX and PLATSA are explicit profiles over the shared Storage One downloader, GLB decoder, material converter, and OBJ exporter.
+
+## METHOD export
+
+METHOD uses the HomeByMe capture formats already supported by this repository. The one-command exporter captures, maps, converts, and assembles a flat Y-up OBJ with materials, textures, worktops, plinths, and an assembly report:
+
+```bash
+node packages/cli/bin/ikea-assets.js method-export "<planner-url>" --out assets/method --name my-method-kitchen
+```
+
+## METHOD/HomeByMe pipeline
 
 The pipeline is:
 
@@ -13,18 +83,18 @@ capture -> manifest -> download -> inspect/decode -> convert/export
 Commands:
 
 ```bash
-npm run test
-node bin/ikea-assets.js capture-browser "<planner-url>" --out capture/playwright --save-bodies
-node bin/ikea-assets.js inspect capture/playwright/bodies -o capture/playwright/decoded
-node bin/ikea-assets.js map-assets capture/playwright/bodies/<project>.BMPROJ capture/playwright/manifest.json --metadata capture/playwright/bodies/<metadata> -o capture/playwright/asset-map.json --tsv capture/playwright/asset-map.tsv
-node bin/ikea-assets.js convert capture/playwright/bodies -o assets/exported/live-home-3d --format obj --scale 0.001
-node bin/ikea-assets.js name-exports capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/named-obj
-node bin/ikea-assets.js assemble capture/playwright/bodies/<project>.BMPROJ capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/assemblies --instance <furniture-uuid-or-dbId>
-node bin/ikea-assets.js assemble capture/playwright/bodies/<project>.BMPROJ capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/whole-kitchen --whole --worktops --flat --axis y-up --name ikea-kitchen-livehome-flat-yup
-node bin/ikea-assets.js preview assets/whole-kitchen/ikea-kitchen-livehome-flat-yup.obj --mtl assets/whole-kitchen/ikea-kitchen-livehome-flat-yup.mtl -o assets/previews/kitchen
-node bin/ikea-assets.js preview assets/whole-kitchen/ikea-kitchen-livehome-flat-yup.obj --mtl assets/whole-kitchen/ikea-kitchen-livehome-flat-yup.mtl -o assets/previews/worktops --only-material procedural_worktop
-node bin/ikea-assets.js preview assets/whole-kitchen/ikea-kitchen-livehome-flat-yup.obj --mtl assets/whole-kitchen/ikea-kitchen-livehome-flat-yup.mtl -o assets/previews/plinths --only-material procedural_plinth
-node bin/ikea-assets.js convert capture/playwright/bodies -o assets/exported/glb --format glb --scale 0.001
+bun run test
+node packages/cli/bin/ikea-assets.js capture-browser "<planner-url>" --out capture/playwright --save-bodies
+node packages/cli/bin/ikea-assets.js inspect capture/playwright/bodies -o capture/playwright/decoded
+node packages/cli/bin/ikea-assets.js map-assets capture/playwright/bodies/<project>.BMPROJ capture/playwright/manifest.json --metadata capture/playwright/bodies/<metadata> -o capture/playwright/asset-map.json --tsv capture/playwright/asset-map.tsv
+node packages/cli/bin/ikea-assets.js convert capture/playwright/bodies -o assets/exported/live-home-3d --format obj --scale 0.001
+node packages/cli/bin/ikea-assets.js name-exports capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/named-obj
+node packages/cli/bin/ikea-assets.js assemble capture/playwright/bodies/<project>.BMPROJ capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/assemblies --instance <furniture-uuid-or-dbId>
+node packages/cli/bin/ikea-assets.js assemble capture/playwright/bodies/<project>.BMPROJ capture/playwright/asset-map.json --obj-dir assets/exported/live-home-3d -o assets/whole-kitchen --whole --worktops --flat --axis y-up --name ikea-kitchen-livehome-flat-yup
+node packages/cli/bin/ikea-assets.js preview assets/whole-kitchen/ikea-kitchen-livehome-flat-yup.obj --mtl assets/whole-kitchen/ikea-kitchen-livehome-flat-yup.mtl -o assets/previews/kitchen
+node packages/cli/bin/ikea-assets.js preview assets/whole-kitchen/ikea-kitchen-livehome-flat-yup.obj --mtl assets/whole-kitchen/ikea-kitchen-livehome-flat-yup.mtl -o assets/previews/worktops --only-material procedural_worktop
+node packages/cli/bin/ikea-assets.js preview assets/whole-kitchen/ikea-kitchen-livehome-flat-yup.obj --mtl assets/whole-kitchen/ikea-kitchen-livehome-flat-yup.mtl -o assets/previews/plinths --only-material procedural_plinth
+node packages/cli/bin/ikea-assets.js convert capture/playwright/bodies -o assets/exported/glb --format glb --scale 0.001
 ```
 
 If Live Home 3D warns that a whole-kitchen OBJ is too complex, add `--internal-parts omit` to remove hidden cabinet contents, `--proxy-over-faces 1000` for a lighter import, or `--proxy-over-faces 500` for the most import-friendly version. These options keep planner placement, procedural worktops, and sink/hob/tap cutouts while either omitting hidden internals or replacing high-face-count child parts with fitted bounding-box proxies.

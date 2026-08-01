@@ -110,10 +110,15 @@ function shouldSaveBody(entry, candidateRe) {
 function redactHeaders(headers) {
   const out = {};
   for (const [key, value] of Object.entries(headers || {})) {
-    if (/^(cookie|authorization|x-csrf|x-xsrf|set-cookie)$/i.test(key)) out[key] = "[redacted]";
+    if (isSensitiveHeader(key)) out[key] = "[redacted]";
     else out[key] = value;
   }
   return out;
+}
+
+function isSensitiveHeader(key) {
+  return /^(cookie|authorization|proxy-authorization|x-csrf|x-xsrf|set-cookie)$/i.test(key) ||
+    /(?:api[-_]?key|subscription[-_]?key|access[-_]?token|auth[-_]?token|client[-_]?secret)$/i.test(key);
 }
 
 function summarize(assets) {
@@ -135,4 +140,4 @@ function summarize(assets) {
   };
 }
 
-module.exports = { captureBrowser };
+module.exports = { captureBrowser, redactHeaders };

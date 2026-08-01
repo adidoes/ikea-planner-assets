@@ -1,0 +1,17 @@
+{
+  "name": "@ikea-planner-assets/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Command-line interface for all IKEA planner exporters.",
+  "type": "commonjs",
+  "bin": {
+    "ikea-assets": "bin/ikea-assets.js"
+  },
+  "dependencies": {
+    "@ikea-planner-assets/method": "workspace:*",
+    "@ikea-planner-assets/storage-one": "workspace:*",
+    "commander": "^15.0.0",
+    "playwright": "1.60.0",
+    "three": "^0.184.0"
+  }
+}

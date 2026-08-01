@@ -1,28 +1,28 @@
 {
   "name": "ikea-planner-assets",
   "version": "1.0.0",
-  "description": "Capture, download, inspect, and convert IKEA/HomeByMe kitchen planner assets.",
-  "main": "bin/ikea-assets.js",
-  "bin": {
-    "ikea-assets": "bin/ikea-assets.js"
-  },
+  "private": true,
+  "description": "Capture and convert IKEA METHOD, PLATSA, and PAX planner designs into portable 3D assets.",
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "capture": "node bin/ikea-assets.js capture-browser",
-    "inspect": "node bin/ikea-assets.js inspect",
-    "test": "node bin/ikea-assets.js self-test"
+    "capture": "node packages/cli/bin/ikea-assets.js capture-browser",
+    "inspect": "node packages/cli/bin/ikea-assets.js inspect",
+    "test": "node packages/cli/bin/ikea-assets.js self-test",
+    "test:all": "bun run test && bun run web:test",
+    "web:dev": "bun --cwd apps/web dev",
+    "web:build": "bun --cwd apps/web build",
+    "web:test": "bun --cwd apps/web test"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
-  "dependencies": {
-    "@gltf-transform/core": "^4.4.0",
-    "@gltf-transform/functions": "^4.4.0",
-    "commander": "^15.0.0",
-    "fflate": "^0.8.3",
-    "playwright": "^1.60.0",
-    "playwright-core": "^1.60.0",
-    "three": "^0.184.0",
-    "yauzl": "^3.4.0"
+  "overrides": {
+    "postcss": "^8.5.25",
+    "sharp": "^0.35.3"
   }
 }

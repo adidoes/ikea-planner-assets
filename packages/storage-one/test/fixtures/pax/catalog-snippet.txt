@@ -1,0 +1,4 @@
+const products=[
+  {template:{size:{depth:580,width:500,height:2360},id:`PAX-frame-236`},dexf:`ART-10458220`,meta:{design:`white`},modelURI:`https://content.dexf.ikea.com/cdn/asset/pax/rt/irx1eco3st5v.glb`,id:`10458220`,type:`pax-hinge-frame`},
+  {template:{size:{depth:16,width:495,height:2294},modelTransform:{p:{y:-1147}},id:`PAX-door-236`},dexf:`ART-80580665`,meta:{design:`white`},modelURI:`https://content.dexf.ikea.com/cdn/asset/pax/rt/lpv6t943unnh.glb`,id:`80580665`,type:`pax-hinge-door-softclosing`}
+];

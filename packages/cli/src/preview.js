@@ -4,7 +4,6 @@ const fs = require("node:fs/promises");
 const http = require("node:http");
 const path = require("node:path");
 const { chromium } = require("playwright");
-const { ensureDir, writeJson } = require("./common");
 
 async function previewObj(objPath, options) {
   const objAbs = path.resolve(objPath);
@@ -66,6 +65,7 @@ async function previewObj(objPath, options) {
 
 async function createPreviewServer(config) {
   const rootDir = config.rootDir;
+  const threeRoot = path.dirname(path.dirname(require.resolve("three")));
   const html = viewerHtml(config);
   const server = http.createServer(async (req, res) => {
     try {
@@ -85,10 +85,10 @@ async function createPreviewServer(config) {
         send(res, 200, contentType(abs), data);
         return;
       }
-      if (url.pathname.startsWith("/node_modules/")) {
-        const abs = path.resolve(process.cwd(), `.${url.pathname}`);
-        const nodeModules = path.resolve(process.cwd(), "node_modules");
-        if (!abs.startsWith(`${nodeModules}${path.sep}`)) {
+      if (url.pathname.startsWith("/node_modules/three/")) {
+        const rel = decodeURIComponent(url.pathname.slice("/node_modules/three/".length));
+        const abs = path.resolve(threeRoot, rel);
+        if (!abs.startsWith(`${threeRoot}${path.sep}`)) {
           send(res, 403, "text/plain", "Forbidden");
           return;
         }
@@ -324,6 +324,15 @@ function contentType(filePath) {
 
 function sanitizePreviewName(value) {
   return String(value).replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "preview";
+}
+
+async function ensureDir(dir) {
+  await fs.mkdir(dir, { recursive: true });
+}
+
+async function writeJson(file, value) {
+  await ensureDir(path.dirname(file));
+  await fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 module.exports = { previewObj };

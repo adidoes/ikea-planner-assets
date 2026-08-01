@@ -51,11 +51,11 @@ Recommended capture and Live Home 3D export flow:
 
 ```bash
 npm run test
-node bin/ikea-assets.js index-bundles capture/bundles -o capture/meta/bundle-index.json
-node bin/ikea-assets.js capture-browser "https://kitchen.planner.ikea.com/be/en/planner/296A373C-D0E2-4BDB-B7CC-B69FF4441452/" --out capture/playwright --save-bodies
-node bin/ikea-assets.js inspect capture/playwright/bodies -o capture/playwright/decoded
-node bin/ikea-assets.js convert capture/playwright/bodies -o assets/exported/live-home-3d --format obj --scale 0.001
-node bin/ikea-assets.js convert capture/playwright/bodies -o assets/exported/glb --format glb --scale 0.001
+node packages/cli/bin/ikea-assets.js index-bundles capture/bundles -o capture/meta/bundle-index.json
+node packages/cli/bin/ikea-assets.js capture-browser "https://kitchen.planner.ikea.com/be/en/planner/296A373C-D0E2-4BDB-B7CC-B69FF4441452/" --out capture/playwright --save-bodies
+node packages/cli/bin/ikea-assets.js inspect capture/playwright/bodies -o capture/playwright/decoded
+node packages/cli/bin/ikea-assets.js convert capture/playwright/bodies -o assets/exported/live-home-3d --format obj --scale 0.001
+node packages/cli/bin/ikea-assets.js convert capture/playwright/bodies -o assets/exported/glb --format glb --scale 0.001
 ```
 
 The `--scale 0.001` option converts ByMe millimeter units to meters. For OBJ export, node transforms and local geometry are both scaled consistently.
@@ -72,6 +72,6 @@ If automated capture misses session-bound requests, use DevTools on the working 
 2. Reload the planner.
 3. Filter for `.br`, `.geom`, `.texture`, `cloudfront`, `byme-ikea-prod`, or `FullInfos`.
 4. Export a HAR or copy selected requests as cURL into a local file.
-5. Run `node bin/ikea-assets.js import-requests <file> -o capture/manifest.json`.
+5. Run `node packages/cli/bin/ikea-assets.js import-requests <file> -o capture/manifest.json`.
 
 Do not commit auth-bearing HAR/cURL files. Treat them as secrets if they include cookies or bearer tokens.

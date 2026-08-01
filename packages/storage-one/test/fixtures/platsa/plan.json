@@ -1,0 +1,65 @@
+{
+  "configurationId": "337F9K6",
+  "configuration": {
+    "content": {
+      "entities": [
+        {
+          "id": "57",
+          "ref": "50330951",
+          "parent": "58",
+          "c": {
+            "WorldTransformComponent": {
+              "p": { "x": 0, "y": 911.0000000000002, "z": 275.0000000000001 },
+              "r": { "w": 1, "x": 0, "y": 0, "z": 0 }
+            }
+          }
+        },
+        {
+          "id": "53",
+          "ref": "70617400",
+          "parent": "54",
+          "c": {
+            "WorldTransformComponent": {
+              "p": { "x": 261, "y": 911.0000000000002, "z": 589.5000000000001 },
+              "r": { "w": 1, "x": 0, "y": 0, "z": 0 }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "icf": {
+    "content": {
+      "articles": [
+        {
+          "id": 1,
+          "product_id": "ART-50330951",
+          "name": "50330951 600x1800x550",
+          "category": "platsa-frame",
+          "parent_ids": [],
+          "child_ids": [11],
+          "dimensions": { "x": 600, "y": 1800, "z": 550 },
+          "transform": {
+            "position": { "x": 0, "y": 911.0000000000002, "z": 275.0000000000001 },
+            "rotation": { "x": 0, "y": 0, "z": 0 },
+            "scale": { "x": 1, "y": 1, "z": 1 }
+          }
+        },
+        {
+          "id": 11,
+          "product_id": "ART-70617400",
+          "name": "70617400 38x45x39",
+          "category": "knob",
+          "parent_ids": [1],
+          "child_ids": [],
+          "dimensions": { "x": 38, "y": 45, "z": 39 },
+          "transform": {
+            "position": { "x": 261, "y": 911.0000000000002, "z": 589.5000000000001 },
+            "rotation": { "x": 0, "y": 0, "z": 0 },
+            "scale": { "x": 1, "y": 1, "z": 1 }
+          }
+        }
+      ]
+    }
+  }
+}
