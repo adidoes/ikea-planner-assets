@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { PlannerLogo } from "@/components/planner-logo";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 
@@ -216,7 +217,7 @@ export function Exporter() {
     <div className="dashboard-shell">
       <aside className="dashboard-sidebar" aria-label="Export navigation">
         <div className="sidebar-brand">
-          <span className="sidebar-brand-mark" aria-hidden="true"><Box size={18} /></span>
+          <PlannerLogo />
           <div>
             <strong>Planner Exporter</strong>
             <span>Local workspace</span>
