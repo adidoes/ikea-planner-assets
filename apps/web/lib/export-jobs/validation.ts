@@ -1,3 +1,8 @@
+import {
+  DEFAULT_PLANNER_SLUG,
+  normalizePlannerSlug,
+  plannerChoiceMessage,
+} from "@ikea-planner-assets/planner-registry";
 import type { PlannerType } from "./types";
 
 const DEFAULT_ALLOWED_SUFFIXES = ["ikea.com"];
@@ -59,9 +64,8 @@ export function validateJobId(value: string): string {
 }
 
 export function validatePlannerType(value: unknown): PlannerType {
-  if (value === undefined || value === null || value === "") return "platsa";
-  if (value === "platsa") return "platsa";
-  if (value === "pax") return "pax";
-  if (value === "method" || value === "kitchen") return "method";
-  throw new InputValidationError("Choose the PLATSA, PAX, or METHOD planner.");
+  if (value === undefined || value === null || value === "") return DEFAULT_PLANNER_SLUG;
+  const plannerType = normalizePlannerSlug(value);
+  if (plannerType) return plannerType;
+  throw new InputValidationError(plannerChoiceMessage());
 }

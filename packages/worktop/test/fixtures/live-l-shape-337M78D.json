@@ -1,0 +1,70 @@
+{
+  "_fixture": {
+    "capturedAt": "2026-08-02",
+    "calculatorVersion": "4.7.10.5",
+    "configurationId": "337M78D",
+    "publicUrl": "https://www.ikea.com/be/en/planner/custom-worktop-calculator/#/337M78D/"
+  },
+  "configurationId": "337M78D",
+  "application": "cwcalc",
+  "applicationName": "Custom Worktop Calculator",
+  "itemList": {
+    "item": [
+      { "itemType": "ART", "itemNo": "90589646", "quantity": 2.37 },
+      { "itemType": "ART", "itemNo": "90589646", "quantity": 3 },
+      { "itemType": "ART", "itemNo": "90602742", "quantity": 1 }
+    ]
+  },
+  "configuration": {
+    "version": "1.0",
+    "content": {
+      "parameters": [
+        { "name": "material", "value": "laminate" },
+        { "name": "expression", "value": "whitelaminate" },
+        { "name": "coverPanel", "value": "none" },
+        { "name": "edge", "value": "same-color" },
+        { "name": "wallLocation", "value": "four-walls" },
+        { "name": "thickness", "value": "28" },
+        { "name": "sinkMaterial", "value": "noSink" },
+        { "name": "splashback", "value": "none" },
+        { "name": "wallEdgingStripCustomizable", "value": "none" },
+        { "name": "kitchenIslandWallLocation", "value": "no-walls" },
+        { "name": "cutout", "value": "0" },
+        { "name": "freestandingHob", "value": "0" },
+        { "name": "roundedCorner", "value": "0" },
+        { "name": "invertedCorner", "value": "0" },
+        { "name": "singleCut", "value": "0" },
+        { "name": "doubleCut", "value": "0" },
+        { "name": "tripleCut", "value": "0" },
+        { "name": "highCabinetJoint", "value": "0" },
+        { "name": "tapHole", "value": "0" },
+        { "name": "wallPanelRoundCutSmall", "value": "0" },
+        { "name": "wallPanelRoundCutBig", "value": "0" },
+        { "name": "wallPanelSquareCut", "value": "0" },
+        { "name": "wallPanelSingleCut", "value": "0" },
+        { "name": "wallPanelDoubleCut", "value": "0" },
+        { "name": "wallPanelTripleCut", "value": "0" },
+        { "name": "kitchenIslandSingleCut", "value": "0" },
+        { "name": "kitchenIslandRoundedCorner", "value": "0" },
+        { "name": "kitchenIslandSquareCut", "value": "0" },
+        { "name": "kitchenIslandDoubleSided", "value": "false" },
+        { "name": "doubleSided", "value": "false" },
+        { "name": "kitchenIslandSplashBack", "value": "false" },
+        { "name": "shape", "value": "l-shape" },
+        { "name": "shapeFlipped", "value": "false" },
+        { "name": "kitchenIslandFlipped", "value": "false" },
+        { "name": "country", "value": "be" },
+        { "name": "currency", "value": "SEK" },
+        { "name": "price", "value": "395:9" },
+        { "name": "familyPrice", "value": "false" }
+      ],
+      "measurements": { "a": 3000, "b": 3000, "c": 635, "d": 635 }
+    }
+  },
+  "image": [
+    {
+      "typeCode": "main-design-image",
+      "url": "https://content.dexf.ikea.com/origin/vpc/generic/main_generic_image.png"
+    }
+  ]
+}

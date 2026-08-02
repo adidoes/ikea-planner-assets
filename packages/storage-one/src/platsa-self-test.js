@@ -5,7 +5,8 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { extractCatalogProducts, modelKey, optimizedModelUrl } = require("./catalog");
 const { collectPlatsaInstances } = require("./pipeline");
-const { parsePlatsaReference } = require("./reference");
+const { parsePlatsaReference, parseStorageOneReference } = require("./reference");
+const { PROFILES, STORAGE_ONE_PLANNER_IDS } = require("./profile");
 
 async function runPlatsaSelfTest() {
   const url = "https://www.ikea.com/addon-app/storageone/platsa/web/latest/be/en/?vpcSource=clipboard#/vpc/337F9K6";
@@ -18,6 +19,30 @@ async function runPlatsaSelfTest() {
     plannerUrl: url,
   });
   assert.equal(parsePlatsaReference("337f9k6").planId, "337F9K6");
+  assert.throws(
+    () => parsePlatsaReference("https://www.ikea.com/addon-app/storageone/pax/web/latest/be/en/#/vpc/337LMDY"),
+    /belongs to PAX, not PLATSA/,
+  );
+
+  assert.deepEqual(STORAGE_ONE_PLANNER_IDS, [
+    "besta", "billy", "boaxel", "bror", "eket", "elvarli", "ivar", "jonaxel",
+    "kallax", "knoxhult", "ladmakare", "lastare", "pax", "platsa", "smastad",
+  ]);
+  for (const profile of Object.values(PROFILES)) {
+    const profileUrl = `https://www.ikea.com/addon-app/storageone/${profile.id}/web/latest/be/en/?vpcSource=clipboard#/vpc/ABC123`;
+    const reference = parseStorageOneReference(profileUrl, {}, profile.id);
+    assert.equal(reference.planId, "ABC123");
+    assert.equal(reference.retailUnit, "BE");
+    assert.equal(reference.language, "en");
+    assert.equal(reference.plannerUrl, profileUrl);
+
+    const galleryUrl = `https://www.ikea.com/addon-app/storageone/${profile.id}/web/latest/be/en/#/planner?vpc=ABC123`;
+    assert.equal(parseStorageOneReference(galleryUrl, {}, profile.id).planId, "ABC123");
+    assert.equal(
+      parseStorageOneReference(`https://www.ikea.com/addon-app/storageone/${profile.id}/web/latest/be/en/#/designId/ABC123`, {}, profile.id).planId,
+      "ABC123",
+    );
+  }
 
   const fixtureDir = path.resolve(__dirname, "../test/fixtures/platsa");
   const catalogSource = await fs.readFile(path.join(fixtureDir, "catalog-snippet.txt"), "utf8");

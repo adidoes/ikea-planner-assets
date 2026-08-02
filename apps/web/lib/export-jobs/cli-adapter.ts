@@ -2,6 +2,7 @@ import { createWriteStream } from "node:fs";
 import { mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 import archiver from "archiver";
+import { getPlanner } from "@ikea-planner-assets/planner-registry";
 import { runNodeCommand } from "./command-runner";
 import type { ExportAdapterInput, ExportAdapterResult, PlannerExportAdapter } from "./types";
 
@@ -86,9 +87,9 @@ export class CliPlannerExportAdapter implements PlannerExportAdapter {
 }
 
 function exportCommand(plannerType: ExportAdapterInput["plannerType"]): string {
-  if (plannerType === "pax") return "pax-export";
-  if (plannerType === "method") return "method-export";
-  return "platsa-export";
+  const planner = getPlanner(plannerType);
+  if (!planner) throw new Error(`No CLI exporter is registered for planner ${plannerType}.`);
+  return planner.cli.command;
 }
 
 function commandTimeoutMs(): number {

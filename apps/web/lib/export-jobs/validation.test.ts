@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { DEFAULT_PLANNER_SLUG, PLANNERS } from "@ikea-planner-assets/planner-registry";
 import {
   InputValidationError,
   validateJobId,
@@ -52,15 +53,15 @@ describe("validateJobId", () => {
 });
 
 describe("validatePlannerType", () => {
-  it("defaults old clients to PLATSA and normalizes the old kitchen label", () => {
-    expect(validatePlannerType(undefined)).toBe("platsa");
-    expect(validatePlannerType("platsa")).toBe("platsa");
-    expect(validatePlannerType("pax")).toBe("pax");
-    expect(validatePlannerType("method")).toBe("method");
+  it("accepts every registered planner and normalizes the old kitchen label", () => {
+    expect(validatePlannerType(undefined)).toBe(DEFAULT_PLANNER_SLUG);
+    for (const planner of PLANNERS) {
+      expect(validatePlannerType(planner.slug)).toBe(planner.slug);
+    }
     expect(validatePlannerType("kitchen")).toBe("method");
   });
 
   it("rejects unknown planners", () => {
-    expect(() => validatePlannerType("besta")).toThrow(/PLATSA, PAX, or METHOD/);
+    expect(() => validatePlannerType("not-a-planner")).toThrow(/PLATSA/);
   });
 });

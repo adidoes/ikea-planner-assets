@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import path from "node:path";
+import { DEFAULT_PLANNER_SLUG } from "@ikea-planner-assets/planner-registry";
 import { CliPlannerExportAdapter } from "./cli-adapter";
 import { ExportJobStore } from "./store";
 import type { ExportJob, PlannerExportAdapter, PlannerType, PublicExportJob } from "./types";
@@ -25,7 +26,7 @@ export class ExportJobManager {
     this.adapter = adapter;
   }
 
-  async create(sourceUrl: string, plannerType: PlannerType = "platsa"): Promise<PublicExportJob> {
+  async create(sourceUrl: string, plannerType: PlannerType = DEFAULT_PLANNER_SLUG): Promise<PublicExportJob> {
     await this.initialize();
     await this.cleanExpiredIfDue();
     if (this.queue.length + this.pendingAdmissions >= maxQueuedJobs()) {

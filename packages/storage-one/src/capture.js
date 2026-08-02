@@ -53,7 +53,7 @@ async function captureStorageOne(input, options = {}, planner = "platsa") {
           resolvePlan(payload);
         }
       }, responseErrors));
-    } else if (/\/static\/js\/catalog-[^/]+\.js(?:[?#]|$)/i.test(url)) {
+    } else if (/\/static\/js\/[^/?]*catalog-[^/?]+\.js(?:[?#]|$)/i.test(url)) {
       track(captureText(response, (source) => {
         for (const product of extractCatalogProducts(source, url)) {
           if (!catalogProducts.has(product.id)) catalogProducts.set(product.id, product);

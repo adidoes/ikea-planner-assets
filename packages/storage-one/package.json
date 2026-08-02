@@ -10,6 +10,7 @@
     "./pax": "./src/pax.js"
   },
   "dependencies": {
+    "@ikea-planner-assets/planner-registry": "workspace:*",
     "playwright": "1.60.0",
     "three": "^0.184.0"
   }

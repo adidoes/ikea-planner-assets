@@ -19,11 +19,11 @@ describe("POST /api/exports", () => {
 
     const plannerResponse = await POST(jsonRequest({
       url: "https://www.ikea.com/planner/example",
-      plannerType: "besta",
+      plannerType: "not-a-planner",
     }));
     expect(plannerResponse.status).toBe(400);
-    await expect(plannerResponse.json()).resolves.toEqual({
-      error: "Choose the PLATSA, PAX, or METHOD planner.",
+    await expect(plannerResponse.json()).resolves.toMatchObject({
+      error: expect.stringMatching(/^Choose the .+ planner\.$/),
     });
   });
 

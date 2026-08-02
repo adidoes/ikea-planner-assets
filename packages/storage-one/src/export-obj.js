@@ -22,10 +22,17 @@ async function exportPaxObj(bundle, options = {}) {
 
 async function exportStorageOneObj(bundle, options = {}, planner = "platsa") {
   const profile = storageOneProfile(planner);
+  return exportGlbObj(bundle, options, profile);
+}
+
+async function exportGlbObj(bundle, options = {}, profile = {}) {
   const outDir = options.out;
-  if (!outDir) throw new Error(`export${titleCase(profile.id)}Obj requires options.out`);
+  const exportFunctionName = profile.exportFunctionName || (profile.id ? `export${titleCase(profile.id)}Obj` : "exportGlbObj");
+  if (!outDir) throw new Error(`${exportFunctionName} requires options.out`);
   await ensureDir(outDir);
-  const basename = sanitizeFileName(options.name || `${profile.defaultNamePrefix}-${bundle.planId || "design"}`);
+  const label = profile.label || "IKEA planner";
+  const defaultNamePrefix = profile.defaultNamePrefix || profile.id || "ikea-plan";
+  const basename = sanitizeFileName(options.name || `${defaultNamePrefix}-${bundle.planId || "design"}`);
   const objPath = path.join(outDir, `${basename}.obj`);
   const mtlPath = path.join(outDir, `${basename}.mtl`);
   const textureDir = path.join(outDir, `${basename}_textures`);
@@ -42,7 +49,7 @@ async function exportStorageOneObj(bundle, options = {}, planner = "platsa") {
     await materializeTextures(asset.key, decoded, textureDir, outDir, texturePaths, warnings);
   }
 
-  const mtl = [`# ${profile.label} materials exported by ikea-planner-assets`];
+  const mtl = [`# ${label} materials exported by ikea-planner-assets`];
   for (const [key, decoded] of decodedByKey) {
     for (const material of decoded.materials.length ? decoded.materials : [defaultMaterial()]) {
       const name = sanitizeObjName(`${key}_m${material.index}_${material.name}`);
@@ -61,7 +68,7 @@ async function exportStorageOneObj(bundle, options = {}, planner = "platsa") {
   }
 
   const obj = [
-    `# ${profile.label} design exported by ikea-planner-assets`,
+    `# ${label} design exported by ikea-planner-assets`,
     `mtllib ${path.basename(mtlPath)}`,
   ];
   let vertexBase = 1;
@@ -278,6 +285,7 @@ function titleCase(value) {
 }
 
 module.exports = {
+  exportGlbObj,
   exportPaxObj,
   exportPlatsaObj,
   exportStorageOneObj,

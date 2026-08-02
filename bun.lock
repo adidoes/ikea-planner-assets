@@ -9,6 +9,7 @@
       "name": "@ikea-planner-assets/web",
       "version": "0.1.0",
       "dependencies": {
+        "@ikea-planner-assets/planner-registry": "workspace:*",
         "@radix-ui/react-scroll-area": "^1.2.18",
         "@radix-ui/react-separator": "^1.1.15",
         "@radix-ui/react-slot": "^1.3.3",
@@ -38,11 +39,25 @@
         "ikea-assets": "bin/ikea-assets.js",
       },
       "dependencies": {
+        "@ikea-planner-assets/enhet": "workspace:*",
         "@ikea-planner-assets/method": "workspace:*",
+        "@ikea-planner-assets/planner-registry": "workspace:*",
+        "@ikea-planner-assets/skytta": "workspace:*",
+        "@ikea-planner-assets/sofas": "workspace:*",
+        "@ikea-planner-assets/space": "workspace:*",
         "@ikea-planner-assets/storage-one": "workspace:*",
+        "@ikea-planner-assets/worktop": "workspace:*",
         "commander": "^15.0.0",
         "playwright": "1.60.0",
         "three": "^0.184.0",
+      },
+    },
+    "packages/enhet": {
+      "name": "@ikea-planner-assets/enhet",
+      "version": "0.1.0",
+      "dependencies": {
+        "@ikea-planner-assets/storage-one": "workspace:*",
+        "playwright": "1.60.0",
       },
     },
     "packages/method": {
@@ -55,13 +70,45 @@
         "playwright": "1.60.0",
       },
     },
+    "packages/planner-registry": {
+      "name": "@ikea-planner-assets/planner-registry",
+      "version": "0.1.0",
+    },
+    "packages/skytta": {
+      "name": "@ikea-planner-assets/skytta",
+      "version": "0.1.0",
+      "dependencies": {
+        "@ikea-planner-assets/space": "workspace:*",
+        "@ikea-planner-assets/storage-one": "workspace:*",
+      },
+    },
+    "packages/sofas": {
+      "name": "@ikea-planner-assets/sofas",
+      "version": "0.1.0",
+      "dependencies": {
+        "@ikea-planner-assets/storage-one": "workspace:*",
+        "playwright": "1.60.0",
+      },
+    },
+    "packages/space": {
+      "name": "@ikea-planner-assets/space",
+      "version": "0.1.0",
+      "dependencies": {
+        "@ikea-planner-assets/storage-one": "workspace:*",
+      },
+    },
     "packages/storage-one": {
       "name": "@ikea-planner-assets/storage-one",
       "version": "0.1.0",
       "dependencies": {
+        "@ikea-planner-assets/planner-registry": "workspace:*",
         "playwright": "1.60.0",
         "three": "^0.184.0",
       },
+    },
+    "packages/worktop": {
+      "name": "@ikea-planner-assets/worktop",
+      "version": "0.1.0",
     },
   },
   "overrides": {
@@ -131,11 +178,23 @@
 
     "@ikea-planner-assets/cli": ["@ikea-planner-assets/cli@workspace:packages/cli"],
 
+    "@ikea-planner-assets/enhet": ["@ikea-planner-assets/enhet@workspace:packages/enhet"],
+
     "@ikea-planner-assets/method": ["@ikea-planner-assets/method@workspace:packages/method"],
+
+    "@ikea-planner-assets/planner-registry": ["@ikea-planner-assets/planner-registry@workspace:packages/planner-registry"],
+
+    "@ikea-planner-assets/skytta": ["@ikea-planner-assets/skytta@workspace:packages/skytta"],
+
+    "@ikea-planner-assets/sofas": ["@ikea-planner-assets/sofas@workspace:packages/sofas"],
+
+    "@ikea-planner-assets/space": ["@ikea-planner-assets/space@workspace:packages/space"],
 
     "@ikea-planner-assets/storage-one": ["@ikea-planner-assets/storage-one@workspace:packages/storage-one"],
 
     "@ikea-planner-assets/web": ["@ikea-planner-assets/web@workspace:apps/web"],
+
+    "@ikea-planner-assets/worktop": ["@ikea-planner-assets/worktop@workspace:packages/worktop"],
 
     "@img/colour": ["@img/colour@1.1.0", "", {}, "sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ=="],
 

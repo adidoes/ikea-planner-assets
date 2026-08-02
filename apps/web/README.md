@@ -1,6 +1,8 @@
 # Planner Exporter Dashboard
 
-A local Next.js dashboard for turning accessible PLATSA, PAX, and METHOD planner share URLs into downloadable OBJ bundles. It keeps an export history, shows job details and previews, and invokes the matching repository command in an isolated per-job directory.
+A local Next.js dashboard for turning public IKEA planner share URLs into downloadable OBJ bundles. It keeps an export history, shows job details and previews, and invokes the matching registry-backed repository command in an isolated per-job directory.
+
+The planner selector is generated from `@ikea-planner-assets/planner-registry`, so the dashboard and CLI expose the same storage-system, Space room/furniture, kitchen, sofa, SKYTTA, and custom-worktop exporters.
 
 ## Run locally
 
@@ -12,7 +14,7 @@ cp apps/web/.env.example apps/web/.env.local
 bun run web:dev
 ```
 
-Open `http://localhost:3000`, choose PLATSA, PAX, or METHOD, paste an IKEA share URL that is accessible without a sign-in, and leave the local server running while the export completes.
+Open `http://localhost:3000`, choose the planner used to create the design, paste an IKEA share URL that is accessible without a sign-in, and leave the local server running while the export completes.
 
 ## Configuration
 
@@ -31,7 +33,7 @@ The server accepts one job at a time by default. Set `IKEA_PLANNER_MAX_CONCURREN
 ## API
 
 - `GET /api/exports` lists persisted jobs newest first.
-- `POST /api/exports` with `{ "url": "https://…", "plannerType": "platsa" }` creates a job and returns HTTP 202. Use `"pax"` for PAX or `"method"` for METHOD.
+- `POST /api/exports` with `{ "url": "https://…", "plannerType": "platsa" }` creates a job and returns HTTP 202. `plannerType` accepts any slug from `@ikea-planner-assets/planner-registry`.
 - `GET /api/exports/:jobId` returns current phase, progress, log tail, and any terminal error.
 - `GET /api/exports/:jobId/preview` streams the generated PNG preview when available.
 - `GET /api/exports/:jobId/download` streams the finished ZIP bundle.

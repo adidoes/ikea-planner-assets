@@ -1,0 +1,16 @@
+{
+  "name": "@ikea-planner-assets/planner-registry",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared registry of IKEA planners supported by the CLI and dashboard.",
+  "type": "commonjs",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "require": "./index.js",
+      "default": "./index.js"
+    }
+  }
+}

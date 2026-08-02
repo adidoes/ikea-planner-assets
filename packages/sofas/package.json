@@ -1,0 +1,20 @@
+{
+  "name": "@ikea-planner-assets/sofas",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Capture public IKEA sofa planner designs and export them as OBJ bundles.",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./self-test": "./src/self-test.js"
+  },
+  "scripts": {
+    "test": "node src/self-test.js",
+    "test:live": "IKEA_SOFA_LIVE_TEST=1 node src/self-test.js"
+  },
+  "dependencies": {
+    "@ikea-planner-assets/storage-one": "workspace:*",
+    "playwright": "1.60.0"
+  }
+}

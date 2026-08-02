@@ -1,25 +1,24 @@
 "use strict";
 
-const PROFILES = Object.freeze({
-  platsa: Object.freeze({
-    id: "platsa",
-    label: "PLATSA",
-    defaultOut: "assets/platsa",
-    defaultNamePrefix: "platsa",
-    reportSuffix: "platsa-report.json",
-    catalogSchema: "ikea-planner-assets.platsa-catalog.v1",
-    exportSchema: "ikea-planner-assets.platsa-export.v1",
-  }),
-  pax: Object.freeze({
-    id: "pax",
-    label: "PAX",
-    defaultOut: "assets/pax",
-    defaultNamePrefix: "pax",
-    reportSuffix: "pax-report.json",
-    catalogSchema: "ikea-planner-assets.pax-catalog.v1",
-    exportSchema: "ikea-planner-assets.pax-export.v1",
-  }),
-});
+const { STORAGE_ONE_PLANNERS } = require("@ikea-planner-assets/planner-registry");
+
+const PROFILE_LABELS = Object.freeze(Object.fromEntries(
+  STORAGE_ONE_PLANNERS.map(({ slug, label }) => [slug, label]),
+));
+
+const PROFILES = Object.freeze(Object.fromEntries(
+  Object.entries(PROFILE_LABELS).map(([id, label]) => [id, Object.freeze({
+    id,
+    label,
+    defaultOut: `assets/${id}`,
+    defaultNamePrefix: id,
+    reportSuffix: `${id}-report.json`,
+    catalogSchema: `ikea-planner-assets.${id}-catalog.v1`,
+    exportSchema: `ikea-planner-assets.${id}-export.v1`,
+  })]),
+));
+
+const STORAGE_ONE_PLANNER_IDS = Object.freeze(Object.keys(PROFILES));
 
 function storageOneProfile(value = "platsa") {
   const id = typeof value === "object" && value?.id
@@ -30,4 +29,4 @@ function storageOneProfile(value = "platsa") {
   return profile;
 }
 
-module.exports = { PROFILES, storageOneProfile };
+module.exports = { PROFILE_LABELS, PROFILES, STORAGE_ONE_PLANNER_IDS, storageOneProfile };

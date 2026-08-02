@@ -1,0 +1,18 @@
+{
+  "name": "@ikea-planner-assets/space",
+  "version": "0.1.0",
+  "private": true,
+  "description": "IKEA Space public-plan capture and GLB-to-OBJ export pipeline.",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./dexf": "./src/dexf.js"
+  },
+  "scripts": {
+    "test": "node src/space-self-test.js"
+  },
+  "dependencies": {
+    "@ikea-planner-assets/storage-one": "workspace:*"
+  }
+}

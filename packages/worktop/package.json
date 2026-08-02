@@ -1,0 +1,16 @@
+{
+  "name": "@ikea-planner-assets/worktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Public IKEA Custom Worktop Calculator configuration loader and OBJ exporter.",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./self-test": "./src/self-test.js"
+  },
+  "scripts": {
+    "test": "node src/self-test.js",
+    "test:live": "IKEA_WORKTOP_LIVE=1 node src/self-test.js"
+  }
+}

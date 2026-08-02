@@ -1,3 +1,5 @@
+import type { PlannerSlug } from "@ikea-planner-assets/planner-registry";
+
 export const EXPORT_PHASES = [
   { key: "queued", label: "Queued" },
   { key: "capturing", label: "Capturing planner" },
@@ -9,7 +11,7 @@ export const EXPORT_PHASES = [
 
 export type ExportPhase = (typeof EXPORT_PHASES)[number]["key"];
 export type ExportStatus = "queued" | "running" | "complete" | "failed";
-export type PlannerType = "platsa" | "pax" | "method";
+export type PlannerType = PlannerSlug;
 
 export interface ExportJob {
   id: string;

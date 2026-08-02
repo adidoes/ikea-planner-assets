@@ -2,6 +2,14 @@
 "use strict";
 
 const { Command } = require("commander");
+const enhetModule = require("@ikea-planner-assets/enhet");
+const methodModule = require("@ikea-planner-assets/method");
+const skyttaModule = require("@ikea-planner-assets/skytta");
+const spaceModule = require("@ikea-planner-assets/space");
+const sofasModule = require("@ikea-planner-assets/sofas");
+const storageOneModule = require("@ikea-planner-assets/storage-one");
+const worktopModule = require("@ikea-planner-assets/worktop");
+const { PLANNERS } = require("@ikea-planner-assets/planner-registry");
 const {
   assembleInputs,
   captureBrowser,
@@ -13,8 +21,7 @@ const {
   inspectInputs,
   mapAssets,
   nameExports,
-} = require("@ikea-planner-assets/method");
-const { exportPaxPlan, exportPlatsaPlan } = require("@ikea-planner-assets/storage-one");
+} = methodModule;
 const { previewObj } = require("../src/preview");
 const { runSelfTest } = require("../src/self-test");
 
@@ -131,54 +138,162 @@ program
   .action(async (bmproj, manifest, options) => mapAssets(bmproj, manifest, options));
 
 program
-  .command("method-export")
-  .description("Capture a shared METHOD kitchen plan and export one OBJ/MTL bundle.")
-  .argument("<planner-url>", "METHOD kitchen planner URL")
-  .option("-o, --out <dir>", "Output directory", "assets/method")
-  .option("--name <name>", "Output basename", "ikea-method-kitchen")
-  .option("--wait-ms <ms>", "Extra capture wait after network idle", parseInteger, 25000)
-  .option("--axis <axis>", "Output axis: y-up or z-up", "y-up")
-  .option("--scale <n>", "Unit scale from planner millimetres", Number.parseFloat, 0.001)
-  .option("--proxy-over-faces <n>", "Proxy child parts above this face count", parseInteger)
-  .option("--internal-parts <mode>", "Hidden/internal parts: keep, proxy, or omit", "keep")
-  .option("--headed", "Show the browser")
-  .action(async (url, options) => exportMethodPlan(url, options));
-
-addStorageOneExportCommand({
-  command: "platsa-export",
-  label: "PLATSA",
-  out: "assets/platsa",
-  exporter: exportPlatsaPlan,
-});
-
-addStorageOneExportCommand({
-  command: "pax-export",
-  label: "PAX",
-  out: "assets/pax",
-  exporter: exportPaxPlan,
-});
-
-program
   .command("self-test")
   .description("Run local smoke tests for manifest import, decoding, and conversion fallbacks.")
   .action(async () => runSelfTest());
 
-function addStorageOneExportCommand({ command, label, out, exporter }) {
-  program
-    .command(command)
-    .description(`Download a public ${label} design and export one OBJ/MTL bundle.`)
-    .argument("<urlOrId>", `${label} share URL or plan id`)
-    .option("-o, --out <dir>", "Output directory", out)
-    .option("--retail-unit <code>", "Retail unit for a bare plan id", "BE")
-    .option("--language <code>", "Language for a bare plan id", "en")
-    .option("--name <name>", "Output basename")
-    .option("--axis <axis>", "Output axis: y-up or z-up", "y-up")
-    .option("--model-variant <variant>", "Model variant: compatible or optimized", "compatible")
-    .option("--concurrency <n>", "Parallel model downloads", parseInteger, 6)
-    .option("--timeout-ms <ms>", "Planner timeout", parseInteger, 90000)
-    .option("--settle-ms <ms>", "Post-load settling time", parseInteger, 1200)
-    .option("--headed", "Show the browser")
-    .action(async (input, options) => exporter(input, options));
+const CLI_EXPORT_ADAPTERS = {
+  enhet: {
+    module: enhetModule,
+    invoke(exporter, _planner, input, options) {
+      return exporter(input, options);
+    },
+    configure(command, planner) {
+      return command
+        .description(`Download a public ${planner.label} design and export one OBJ/MTL bundle.`)
+        .argument("<urlOrId>", `${planner.label} share URL or design code`)
+        .option("-o, --out <dir>", "Output directory", planner.cli.defaultOutput)
+        .option("--retail-unit <code>", "Retail unit for a bare design code", "BE")
+        .option("--language <code>", "Language for a bare design code", "en")
+        .option("--name <name>", "Output basename")
+        .option("--axis <axis>", "Output axis: y-up or z-up", "y-up")
+        .option("--concurrency <n>", "Parallel model downloads", parseInteger, 6)
+        .option("--timeout-ms <ms>", "Planner timeout", parseInteger, 90000)
+        .option("--settle-ms <ms>", "Post-load settling time", parseInteger, 1200)
+        .option("--headed", "Show the browser");
+    },
+  },
+  method: {
+    module: methodModule,
+    invoke(exporter, _planner, input, options) {
+      return exporter(input, options);
+    },
+    configure(command, planner) {
+      return command
+        .description(`Capture a shared ${planner.label} plan and export one OBJ/MTL bundle.`)
+        .argument("<planner-url>", `${planner.label} planner URL`)
+        .option("-o, --out <dir>", "Output directory", planner.cli.defaultOutput)
+        .option("--name <name>", "Output basename", planner.cli.defaultName)
+        .option("--wait-ms <ms>", "Extra capture wait after network idle", parseInteger, 25000)
+        .option("--axis <axis>", "Output axis: y-up or z-up", "y-up")
+        .option("--scale <n>", "Unit scale from planner millimetres", Number.parseFloat, 0.001)
+        .option("--proxy-over-faces <n>", "Proxy child parts above this face count", parseInteger)
+        .option("--internal-parts <mode>", "Hidden/internal parts: keep, proxy, or omit", "keep")
+        .option("--headed", "Show the browser");
+    },
+  },
+  skytta: {
+    module: skyttaModule,
+    invoke(exporter, _planner, input, options) {
+      return exporter(input, options);
+    },
+    configure(command, planner) {
+      return command
+        .description("Download a public IKEA SKYTTA design and export one OBJ/MTL bundle.")
+        .argument("<urlOrId>", "SKYTTA share URL or design code")
+        .option("-o, --out <dir>", "Output directory", planner.cli.defaultOutput)
+        .option("--retail-unit <code>", "Retail unit for a bare design code", "BE")
+        .option("--language <code>", "Language for a bare design code", "en")
+        .option("--name <name>", "Output basename")
+        .option("--axis <axis>", "Output axis: y-up or z-up", "y-up")
+        .option("--concurrency <n>", "Parallel model downloads", parseInteger, 6)
+        .option("--timeout-ms <ms>", "Request timeout", parseInteger, 90000);
+    },
+  },
+  space: {
+    module: spaceModule,
+    invoke(exporter, _planner, input, options) {
+      return exporter(input, options);
+    },
+    configure(command, planner) {
+      return command
+        .description(`Download a public ${planner.label} design and export one OBJ/MTL bundle.`)
+        .argument("<urlOrId>", `${planner.label} share URL or design code`)
+        .option("-o, --out <dir>", "Output directory", planner.cli.defaultOutput)
+        .option("--retail-unit <code>", "Retail unit for a bare design code", "BE")
+        .option("--language <code>", "Language for a bare design code", "en")
+        .option("--name <name>", "Output basename")
+        .option("--axis <axis>", "Output axis: y-up or z-up", "y-up")
+        .option("--model-variant <variant>", "Model variant: compatible or optimized", "compatible")
+        .option("--concurrency <n>", "Parallel model downloads", parseInteger, 6)
+        .option("--timeout-ms <ms>", "Request timeout", parseInteger, 90000);
+    },
+  },
+  sofas: {
+    module: sofasModule,
+    invoke(exporter, planner, input, options) {
+      return exporter(input, options, planner.cli.profile || planner.slug);
+    },
+    configure(command, planner) {
+      return command
+        .description(`Download a public ${planner.label} design and export one OBJ/MTL bundle.`)
+        .argument("<urlOrId>", `${planner.label} share URL or design code`)
+        .option("-o, --out <dir>", "Output directory", planner.cli.defaultOutput)
+        .option("--retail-unit <code>", "Retail unit for a bare design code", "BE")
+        .option("--language <code>", "Language for a bare design code", "en")
+        .option("--name <name>", "Output basename")
+        .option("--axis <axis>", "Output axis: y-up or z-up", "y-up")
+        .option("--download-concurrency <n>", "Parallel model downloads", parseInteger, 4)
+        .option("--timeout-ms <ms>", "Planner timeout", parseInteger, 90000)
+        .option("--settle-ms <ms>", "Post-load settling time", parseInteger, 1500)
+        .option("--headed", "Show the browser");
+    },
+  },
+  "storage-one": {
+    module: storageOneModule,
+    invoke(exporter, planner, input, options) {
+      return exporter(input, options, planner.cli.profile || planner.slug);
+    },
+    configure(command, planner) {
+      return command
+        .description(`Download a public ${planner.label} design and export one OBJ/MTL bundle.`)
+        .argument("<urlOrId>", `${planner.label} share URL or plan id`)
+        .option("-o, --out <dir>", "Output directory", planner.cli.defaultOutput)
+        .option("--retail-unit <code>", "Retail unit for a bare plan id", "BE")
+        .option("--language <code>", "Language for a bare plan id", "en")
+        .option("--name <name>", "Output basename")
+        .option("--axis <axis>", "Output axis: y-up or z-up", "y-up")
+        .option("--model-variant <variant>", "Model variant: compatible or optimized", "compatible")
+        .option("--concurrency <n>", "Parallel model downloads", parseInteger, 6)
+        .option("--timeout-ms <ms>", "Planner timeout", parseInteger, 90000)
+        .option("--settle-ms <ms>", "Post-load settling time", parseInteger, 1200)
+        .option("--headed", "Show the browser");
+    },
+  },
+  worktop: {
+    module: worktopModule,
+    invoke(exporter, _planner, input, options) {
+      return exporter(input, {
+        ...options,
+        country: options.retailUnit,
+      });
+    },
+    configure(command, planner) {
+      return command
+        .description("Download a public IKEA Custom Worktop Calculator design and export one OBJ/MTL bundle.")
+        .argument("<urlOrId>", "Custom worktop saved-design URL or code")
+        .option("-o, --out <dir>", "Output directory", planner.cli.defaultOutput)
+        .option("--retail-unit <code>", "Retail unit for a bare design code", "BE")
+        .option("--language <code>", "Language for a bare design code", "en")
+        .option("--name <name>", "Output basename")
+        .option("--axis <axis>", "Output axis: y-up or z-up", "y-up")
+        .option("--scale <n>", "Unit scale from planner millimetres", Number.parseFloat, 0.001)
+        .option("--timeout-ms <ms>", "Request timeout", parseInteger, 20000);
+    },
+  },
+};
+
+for (const planner of PLANNERS) addPlannerExportCommand(planner);
+
+function addPlannerExportCommand(planner) {
+  const adapter = CLI_EXPORT_ADAPTERS[planner.cli.adapter];
+  const exporter = adapter?.module[planner.cli.exporter];
+  if (!adapter || typeof exporter !== "function") {
+    throw new Error(`Planner registry entry ${planner.slug} has no CLI exporter adapter.`);
+  }
+  adapter
+    .configure(program.command(planner.cli.command), planner)
+    .action(async (input, options) => adapter.invoke(exporter, planner, input, options));
 }
 
 function parseInteger(value) {

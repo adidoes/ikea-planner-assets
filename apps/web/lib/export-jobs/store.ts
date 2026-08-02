@@ -1,6 +1,7 @@
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { DEFAULT_PLANNER_SLUG, normalizePlannerSlug } from "@ikea-planner-assets/planner-registry";
 import type { ExportJob } from "./types";
 
 export class ExportJobStore {
@@ -99,9 +100,7 @@ export class ExportJobStore {
 }
 
 function normalizeStoredJob(job: Omit<ExportJob, "plannerType"> & { plannerType?: string }): ExportJob {
-  let plannerType: ExportJob["plannerType"] = "platsa";
-  if (job.plannerType === "pax") plannerType = "pax";
-  if (job.plannerType === "method" || job.plannerType === "kitchen") plannerType = "method";
+  const plannerType = normalizePlannerSlug(job.plannerType) ?? DEFAULT_PLANNER_SLUG;
   return {
     ...job,
     plannerType,

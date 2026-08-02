@@ -28,10 +28,13 @@ function parseStorageOneReference(input, options = {}, planner = "platsa") {
   if (/^https?:\/\//i.test(raw)) {
     const url = new URL(raw);
     sourceUrl = url.href;
-    const localeMatch = url.pathname.match(new RegExp(`/storageone/${profile.id}/(?:web|kiosk)/[^/]+/([a-z]{2})/([a-z]{2})(?:/|$)`, "i"));
-    if (localeMatch) {
-      retailUnit = localeMatch[1].toUpperCase();
-      language = localeMatch[2].toLowerCase();
+    const plannerPath = url.pathname.match(/\/storageone\/([^/]+)\/(?:web|kiosk)\/[^/]+\/([a-z]{2})\/([a-z]{2})(?:\/|$)/i);
+    if (plannerPath && plannerPath[1].toLowerCase() !== profile.id) {
+      throw new Error(`This Storage One URL belongs to ${plannerPath[1].toUpperCase()}, not ${profile.label}`);
+    }
+    if (plannerPath) {
+      retailUnit = plannerPath[2].toUpperCase();
+      language = plannerPath[3].toLowerCase();
     }
     planId = planIdFromUrl(url);
   } else {
@@ -55,12 +58,18 @@ function parseStorageOneReference(input, options = {}, planner = "platsa") {
 }
 
 function planIdFromUrl(url) {
+  const hashQuery = url.hash.includes("?")
+    ? new URLSearchParams(url.hash.slice(url.hash.indexOf("?") + 1))
+    : null;
   const candidates = [
     url.hash.match(/(?:^#|\/)vpc\/([^/?#]+)/i)?.[1],
     url.hash.match(/(?:^#|\/)u\/([^/?#]+)/i)?.[1],
+    url.hash.match(/(?:^#|\/)designId\/([^/?#]+)/i)?.[1],
+    hashQuery?.get("vpc"),
+    hashQuery?.get("designId"),
     url.searchParams.get("vpc"),
     url.searchParams.get("designId"),
-    url.pathname.match(/\/(?:vpc|u)\/([^/?#]+)/i)?.[1],
+    url.pathname.match(/\/(?:vpc|u|designId)\/([^/?#]+)/i)?.[1],
   ];
   for (const candidate of candidates) {
     const normalized = normalizePlanId(candidate);

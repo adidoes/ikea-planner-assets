@@ -8,8 +8,14 @@
     "ikea-assets": "bin/ikea-assets.js"
   },
   "dependencies": {
+    "@ikea-planner-assets/enhet": "workspace:*",
     "@ikea-planner-assets/method": "workspace:*",
+    "@ikea-planner-assets/planner-registry": "workspace:*",
+    "@ikea-planner-assets/skytta": "workspace:*",
+    "@ikea-planner-assets/space": "workspace:*",
+    "@ikea-planner-assets/sofas": "workspace:*",
     "@ikea-planner-assets/storage-one": "workspace:*",
+    "@ikea-planner-assets/worktop": "workspace:*",
     "commander": "^15.0.0",
     "playwright": "1.60.0",
     "three": "^0.184.0"

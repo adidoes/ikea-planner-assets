@@ -14,8 +14,15 @@ import {
   PackageOpen,
   Plus,
 } from "lucide-react";
+import {
+  DEFAULT_PLANNER_SLUG,
+  PLANNERS,
+  getPlanner,
+  normalizePlannerSlug,
+} from "@ikea-planner-assets/planner-registry";
 
 import type { PlannerType, PublicExportJob } from "@/lib/export-jobs/types";
+import { extractPlanId } from "@/lib/export-jobs/plan-reference";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,10 +30,16 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const HISTORY_KEY = "planner-exporter.jobs.v1";
 const PHASES = ["capturing", "downloading", "exporting", "packaging"] as const;
+const FAMILY_LABELS: Record<string, string> = {
+  storage: "Storage systems",
+  space: "Rooms and furniture",
+  kitchen: "Kitchens",
+  sofas: "Sofas",
+  worktop: "Worktops",
+};
 
 type JobRecord = Omit<PublicExportJob, "plannerType"> & {
   plannerType?: PlannerType;
@@ -38,17 +51,11 @@ interface ApiError {
   error?: string;
 }
 
-const PLANNER_LABEL: Record<PlannerType, string> = {
-  platsa: "PLATSA",
-  pax: "PAX",
-  method: "METHOD",
-};
-
 export function Exporter() {
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(true);
-  const [plannerType, setPlannerType] = useState<PlannerType>("platsa");
+  const [plannerType, setPlannerType] = useState<PlannerType>(DEFAULT_PLANNER_SLUG);
   const [url, setUrl] = useState("");
   const [requestError, setRequestError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -77,7 +84,7 @@ export function Exporter() {
         ...existing,
         ...context,
         ...job,
-        plannerType: normalizePlannerType(job.plannerType) ?? normalizePlannerType(context?.plannerType) ?? existing?.plannerType ?? "platsa",
+        plannerType: normalizePlannerType(job.plannerType) ?? normalizePlannerType(context?.plannerType) ?? existing?.plannerType ?? DEFAULT_PLANNER_SLUG,
         sourceUrl: context?.sourceUrl ?? job.sourceUrl ?? existing?.sourceUrl,
       };
       const updated = [next, ...current.filter((candidate) => candidate.id !== job.id)].sort(
@@ -134,7 +141,7 @@ export function Exporter() {
             return {
               ...local,
               ...job,
-              plannerType: normalizePlannerType(job.plannerType) ?? local?.plannerType ?? "platsa",
+              plannerType: normalizePlannerType(job.plannerType) ?? local?.plannerType ?? DEFAULT_PLANNER_SLUG,
               sourceUrl: local?.sourceUrl,
             };
           });
@@ -304,6 +311,17 @@ function NewExportView({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
 }) {
+  const selectedPlanner = getPlanner(plannerType) ?? getPlanner(DEFAULT_PLANNER_SLUG)!;
+  const plannerGroups = Array.from(
+    PLANNERS.reduce((groups, planner) => {
+      const family = planner.family || "other";
+      const entries = groups.get(family) || [];
+      entries.push(planner);
+      groups.set(family, entries);
+      return groups;
+    }, new Map<string, (typeof PLANNERS)[number][]>()).entries(),
+  );
+
   return (
     <div className="detail-page new-export-page">
       <header className="detail-header">
@@ -322,23 +340,28 @@ function NewExportView({
         <CardContent>
           <form className="new-export-form" onSubmit={onSubmit} noValidate>
             <div className="form-field">
-              <label id="planner-type-label">Planner</label>
-              <Tabs value={plannerType} onValueChange={(value) => setPlannerType(value as PlannerType)}>
-                <TabsList aria-labelledby="planner-type-label">
-                  <TabsTrigger value="platsa">
-                    <Box size={15} aria-hidden="true" />
-                    <span><strong>PLATSA</strong><small>Storage planner</small></span>
-                  </TabsTrigger>
-                  <TabsTrigger value="pax">
-                    <Box size={15} aria-hidden="true" />
-                    <span><strong>PAX</strong><small>Wardrobe planner</small></span>
-                  </TabsTrigger>
-                  <TabsTrigger value="method">
-                    <Box size={15} aria-hidden="true" />
-                    <span><strong>METHOD</strong><small>Kitchen planner</small></span>
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
+              <label htmlFor="planner-type">Planner</label>
+              <div className="planner-picker">
+                <select
+                  id="planner-type"
+                  className="planner-select"
+                  value={plannerType}
+                  onChange={(event) => setPlannerType(event.target.value as PlannerType)}
+                  disabled={isSubmitting}
+                >
+                  {plannerGroups.map(([family, planners]) => (
+                    <optgroup key={family} label={FAMILY_LABELS[family] || "Other planners"}>
+                      {planners.map((planner) => (
+                        <option key={planner.slug} value={planner.slug}>{planner.label}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                <div className="planner-selection-summary" aria-live="polite">
+                  <span aria-hidden="true"><Box size={17} /></span>
+                  <div><strong>{selectedPlanner.label}</strong><small>{selectedPlanner.description}</small></div>
+                </div>
+              </div>
             </div>
 
             <div className="form-field">
@@ -530,12 +553,11 @@ function saveHistory(jobs: JobRecord[]) {
 }
 
 function normalizePlannerType(value: unknown): PlannerType | undefined {
-  if (value === "kitchen") return "method";
-  return value === "platsa" || value === "pax" || value === "method" ? value : undefined;
+  return normalizePlannerSlug(value);
 }
 
 function plannerLabel(type: unknown): string {
-  return PLANNER_LABEL[normalizePlannerType(type) ?? "platsa"];
+  return getPlanner(type)?.label ?? getPlanner(DEFAULT_PLANNER_SLUG)!.label;
 }
 
 function jobName(job: JobRecord): string {
@@ -544,12 +566,6 @@ function jobName(job: JobRecord): string {
   const artifact = job.artifactName?.replace(/\.zip$/i, "").replace(/[-_]+/g, " ").trim();
   if (artifact) return artifact;
   return `${plannerLabel(job.plannerType)} ${job.id.slice(0, 8)}`;
-}
-
-function extractPlanId(sourceUrl?: string): string | null {
-  if (!sourceUrl) return null;
-  const match = sourceUrl.match(/(?:\/vpc\/|\/design\/|\/planner\/|[?#&](?:id|projectId)=)([a-z0-9_-]+)/i);
-  return match?.[1] ?? null;
 }
 
 function phaseIndex(phase: JobRecord["phase"]): number {

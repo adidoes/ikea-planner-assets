@@ -1,0 +1,19 @@
+{
+  "name": "@ikea-planner-assets/skytta",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Capture public IKEA SKYTTA designs and export their GLB geometry as OBJ bundles.",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node src/skytta-self-test.js",
+    "test:live": "node src/skytta-self-test.js --live"
+  },
+  "dependencies": {
+    "@ikea-planner-assets/space": "workspace:*",
+    "@ikea-planner-assets/storage-one": "workspace:*"
+  }
+}
